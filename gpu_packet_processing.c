@@ -451,7 +451,8 @@ int main(int argc, char **argv)
 	 */
 	DOCA_LOG_INFO("Warm up CUDA kernels");
 	DOCA_GPUNETIO_VOLATILE(*cpu_exit_condition) = 1;
-	kernel_receive_udp(rx_udp_stream, gpu_exit_condition, &udp_queues);
+	// kernel_receive_udp(rx_udp_stream, gpu_exit_condition, &udp_queues);
+	kernel_receive_udp_bw(rx_udp_stream, gpu_exit_condition, &udp_queues);
 	kernel_receive_tcp(rx_tcp_stream, gpu_exit_condition, &tcp_queues, app_cfg.http_server);
 	kernel_receive_icmp(rx_icmp_stream, gpu_exit_condition, &icmp_queues);
 	if (app_cfg.http_server)
@@ -466,7 +467,8 @@ int main(int argc, char **argv)
 
 	DOCA_LOG_INFO("Launching CUDA kernels");
 
-	kernel_receive_udp(rx_udp_stream, gpu_exit_condition, &udp_queues);
+	// kernel_receive_udp(rx_udp_stream, gpu_exit_condition, &udp_queues);
+	kernel_receive_udp_bw(rx_udp_stream, gpu_exit_condition, &udp_queues);
 	kernel_receive_tcp(rx_tcp_stream, gpu_exit_condition, &tcp_queues, app_cfg.http_server);
 	kernel_receive_icmp(rx_icmp_stream, gpu_exit_condition, &icmp_queues);
 	if (app_cfg.http_server)

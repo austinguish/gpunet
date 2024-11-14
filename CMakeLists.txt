@@ -88,6 +88,7 @@ set(CUDA_SOURCES
     gpu_kernels/receive_udp.cu
     gpu_kernels/receive_icmp.cu
     gpu_kernels/http_server.cu
+        bw/measure_udp_bw.cu
 )
 
 set(ALL_SOURCES
