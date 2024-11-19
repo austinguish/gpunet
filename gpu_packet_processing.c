@@ -44,6 +44,7 @@ static struct rxq_udp_queues udp_queues;
 static struct rxq_tcp_queues tcp_queues;
 static struct rxq_icmp_queues icmp_queues;
 static struct txq_http_queues http_queues;
+static struct tcp_bw_queues tcp_bw_queues;
 static struct doca_flow_port *df_port;
 static struct doca_pe *pe;
 static uint64_t icmp_last_ping;

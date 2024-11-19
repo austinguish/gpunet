@@ -1,4 +1,3 @@
-
 cmake_minimum_required(VERSION 3.10)
 
 set(CMAKE_CUDA_COMPILER /usr/local/cuda/bin/nvcc)
@@ -116,12 +115,29 @@ set(C_SOURCES
         ${CMAKE_SOURCE_DIR}/gpu_packet_processing.c
 )
 
+set(BW_SOURCES
+        ${CMAKE_SOURCE_DIR}/config_queues/device.c
+        ${CMAKE_SOURCE_DIR}/config_queues/args.c
+        ${CMAKE_SOURCE_DIR}/config_queues/flow.c
+        ${CMAKE_SOURCE_DIR}/config_queues/http_txbuf.c
+        ${CMAKE_SOURCE_DIR}/config_queues/udp_queues.c
+        ${CMAKE_SOURCE_DIR}/config_queues/tcp_queues.c
+        ${CMAKE_SOURCE_DIR}/config_queues/icmp_queues.c
+        ${CMAKE_SOURCE_DIR}/config_queues/tcp_bw_queues.c
+        ${CMAKE_SOURCE_DIR}/dpdk_tcp/tcp_cpu_rss_func.c
+        ${CMAKE_SOURCE_DIR}/dpdk_tcp/tcp_session_table.c
+        ${CMAKE_SOURCE_DIR}/common/utils.c
+        ${CMAKE_SOURCE_DIR}/samples/common.c
+        ${CMAKE_SOURCE_DIR}/gpu_bw.c
+)
+
 set(CUDA_SOURCES
         ${CMAKE_SOURCE_DIR}/gpu_kernels/receive_tcp.cu
         ${CMAKE_SOURCE_DIR}/gpu_kernels/receive_udp.cu
         ${CMAKE_SOURCE_DIR}/gpu_kernels/receive_icmp.cu
         ${CMAKE_SOURCE_DIR}/gpu_kernels/http_server.cu
-#        ${CMAKE_SOURCE_DIR}/bw/measure_udp_bw.cu
+        ${CMAKE_SOURCE_DIR}/gpu_kernels/tcp_bw.cu
+        #        ${CMAKE_SOURCE_DIR}/bw/measure_udp_bw.cu
 )
 
 # Create CUDA library for device code
@@ -174,9 +190,49 @@ foreach(lib ${DPDK_LIBS})
     )
 endforeach()
 
+
+
+# add a new executable gpu_bw  for measuring the bandwidth
+
+
+
+
+add_executable(gpu_bw ${BW_SOURCES})
+target_link_libraries( gpu_bw
+        gpu_kernels
+        ${DOCA_ARGP_LIB}
+        ${DOCA_GPUNETIO_LIB}
+        ${DOCA_GPUNETIO_DEVICE_LIB}
+        ${DOCA_ETH_LIB}
+        ${DOCA_DPDK_BRIDGE_LIB}
+        ${DOCA_FLOW_LIB}
+        ${DOCA_FLOW_CT_LIB}
+        ${DOCA_FLOW_TUNE_LIB}
+        ${DOCA_COMMON_LIB}
+        resolv
+        cudart
+        cuda
+        pthread
+        bsd
+)
+
+# Link DPDK libraries
+foreach(lib ${DPDK_LIBS})
+    target_link_libraries(gpu_bw
+            /opt/mellanox/dpdk/lib/x86_64-linux-gnu/lib${lib}.so
+    )
+endforeach()
+
+
 # Set installation rules
-install(TARGETS doca_gpu_packet_processing
-        RUNTIME DESTINATION bin)
+
+
+
+
+
+
+
+
 if(CMAKE_BUILD_TYPE MATCHES Debug)
     # Add debug symbols
     add_compile_options(-g)
@@ -194,13 +250,11 @@ if(CMAKE_BUILD_TYPE MATCHES Debug)
     add_definitions(-DRTE_LOG_LEVEL=RTE_LOG_DEBUG)
 endif()
 
-# 为调试添加源文件信息
 set_target_properties(doca_gpu_packet_processing PROPERTIES
         COMPILE_FLAGS "-g"
         CUDA_FLAGS "-g -G"
 )
 
-# 确保调试信息不被优化掉
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0")
 set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -O0")
 set(CMAKE_CUDA_FLAGS_DEBUG "${CMAKE_CUDA_FLAGS_DEBUG} -O0")
