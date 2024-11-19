@@ -99,9 +99,11 @@ int tcp_cpu_rss_func(void *lcore_args)
 			} else if (tcp_hdr->fin) {
 				log_tcp_flag(pkt, "FIN");
 				destroy_tcp_session(queue_id, pkt, tcp_queues->port);
+				printf("destroyed a tcp session\n");
 			} else if (tcp_hdr->syn) {
 				log_tcp_flag(pkt, "SYN");
 				result = create_tcp_session(queue_id, pkt, tcp_queues->port, tcp_queues->rxq_pipe_gpu);
+				printf("created a tcp session\n");
 				if (result != DOCA_SUCCESS)
 					goto error;
 			} else {

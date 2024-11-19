@@ -1,213 +1,206 @@
-cmake_minimum_required(VERSION 3.18)
-project(gpu_packet_processing CUDA CXX C)
 
-# Set C++ standard
-set(CMAKE_CXX_STANDARD 11)
+cmake_minimum_required(VERSION 3.10)
+
+set(CMAKE_CUDA_COMPILER /usr/local/cuda/bin/nvcc)
+set(CMAKE_C_COMPILER /usr/bin/gcc)
+set(CMAKE_CXX_COMPILER /usr/bin/g++)
+
+set(CMAKE_CUDA_ARCHITECTURES "75;80;86")
+
+project(DOCA_APPLICATIONS CUDA CXX C)
+
+enable_language(CUDA)
+
+set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -G -g -rdc=true -Xcompiler=-Wall,-Winvalid-pch,-Wnon-virtual-dtor")
+set(CMAKE_CUDA_STANDARD 17)
+set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Enable required CPU features
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -mssse3 -march=native")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mssse3 -march=native")
+set(CMAKE_SKIP_BUILD_RPATH FALSE)
+set(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+set(CMAKE_INSTALL_RPATH "/opt/mellanox/doca/lib/x86_64-linux-gnu:/opt/mellanox/dpdk/lib/x86_64-linux-gnu")
 
-# 首先查找PkgConfig
-find_package(PkgConfig REQUIRED)
-if(NOT PKG_CONFIG_FOUND)
-    message(FATAL_ERROR "pkg-config not found!")
-endif()
+project(DOCA_APPLICATIONS CUDA CXX C)
 
-# 设置DOCA和DPDK路径
-set(DOCA_ROOT_DIR "/opt/mellanox/doca")
-set(DOCA_LIB_DIR "${DOCA_ROOT_DIR}/lib/x86_64-linux-gnu")
-set(DPDK_ROOT_DIR "/opt/mellanox/dpdk")
-set(DPDK_LIB_DIR "${DPDK_ROOT_DIR}/lib/x86_64-linux-gnu")
+set(CMAKE_CUDA_COMPILER /usr/local/cuda/bin/nvcc)
+enable_language(CUDA)
 
-# 设置PKG_CONFIG_PATH
-set(ENV{PKG_CONFIG_PATH} "${DOCA_LIB_DIR}/pkgconfig:${DPDK_LIB_DIR}/pkgconfig:$ENV{PKG_CONFIG_PATH}")
+set(CMAKE_SKIP_BUILD_RPATH FALSE)
+set(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+set(CMAKE_INSTALL_RPATH "/opt/mellanox/doca/lib/x86_64-linux-gnu:/opt/mellanox/dpdk/lib/x86_64-linux-gnu")
 
-# 查找DOCA包
-pkg_check_modules(DOCA REQUIRED
-    doca-common
-    doca-gpunetio
-    doca-argp
-    doca-flow
-    doca-telemetry-exporter
-    doca-dpdk-bridge
-    doca-comch
-    doca-eth
-)
+# Set CUDA settings
+set(CMAKE_CUDA_ARCHITECTURES "80;90")
+set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -G -g -rdc=true -Xcompiler=-Wall,-Winvalid-pch,-Wnon-virtual-dtor")
+set(CMAKE_CUDA_STANDARD 17)
+set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
-# 查找DPDK包
-pkg_check_modules(DPDK REQUIRED libdpdk)
-
-# CUDA Configuration
-find_package(CUDA 12.1 REQUIRED)
-if(CUDA_FOUND)
-    message(STATUS "Found CUDA ${CUDA_VERSION_STRING}")
-    set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS}
-        -gencode arch=compute_80,code=sm_80
-        -gencode arch=compute_90,code=sm_90
-        -rdc=true
-        -forward-unknown-to-host-compiler
-        --relocatable-device-code=true
-    )
-endif()
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_CXX_STANDARD 17)
 
 # Add compile definitions
-add_definitions(-DGPU_SUPPORT)
-add_definitions(-DDOCA_ALLOW_EXPERIMENTAL_API)
-
-# 源文件定义
-set(COMMON_SOURCES
-    common/comch_utils.c
-    common/dpdk_utils.c
-    common/flow_parser.c
-    common/flow_pipes_manager.c
-    common/flow_skeleton.c
-    common/pack.c
-    common/telemetry_exporter.c
-    common/utils.c
+add_definitions(
+        -D_FILE_OFFSET_BITS=64
+        -DDOCA_ALLOW_EXPERIMENTAL_API
+        -DDOCA_ALLOW_DEPRECATED_API
+        -DDOCA_USE_LIBBSD
+        -DRTE_USE_LIBBSD
+        -DALLOW_EXPERIMENTAL_API
+        -DGPU_SUPPORT
 )
 
-set(CONFIG_QUEUE_SOURCES
-    config_queues/args.c
-    config_queues/device.c
-    config_queues/flow.c
-    config_queues/http_txbuf.c
-    config_queues/udp_queues.c
-    config_queues/tcp_queues.c
-    config_queues/icmp_queues.c
+# Set compile options
+add_compile_options(
+        -Wall
+        -Winvalid-pch
+        -Wno-format-zero-length
+        -Wno-missing-braces
+        -Wno-missing-field-initializers
+        -march=corei7
 )
 
-set(DPDK_TCP_SOURCES
-    dpdk_tcp/tcp_cpu_rss_func.c
-    dpdk_tcp/tcp_session_table.c
-)
+add_compile_options(-include ${CMAKE_SOURCE_DIR}/dpdk_include_path.h)
 
-set(CUDA_SOURCES
-    gpu_kernels/receive_tcp.cu
-    gpu_kernels/receive_udp.cu
-    gpu_kernels/receive_icmp.cu
-    gpu_kernels/http_server.cu
-        bw/measure_udp_bw.cu
-)
-
-set(ALL_SOURCES
-    ${COMMON_SOURCES}
-    ${CONFIG_QUEUE_SOURCES}
-    ${DPDK_TCP_SOURCES}
-    samples/common.c
-    gpu_packet_processing.c
-)
+# Create dpdk_include_path.h
+file(WRITE ${CMAKE_SOURCE_DIR}/dpdk_include_path.h
+        "#include <rte_config.h>")
 
 # Include directories
 include_directories(
-    ${CMAKE_SOURCE_DIR}
-    ${CMAKE_SOURCE_DIR}/common
-    ${CMAKE_SOURCE_DIR}/config_queues
-    ${CMAKE_SOURCE_DIR}/samples
-    ${CMAKE_SOURCE_DIR}/dpdk_tcp
-    ${DOCA_INCLUDE_DIRS}
-    ${DPDK_ROOT_DIR}/include
+        ${CMAKE_SOURCE_DIR}
+        ${CMAKE_SOURCE_DIR}/common
+        ${CMAKE_SOURCE_DIR}/config_queues
+        /opt/mellanox/doca/include
+        /usr/include/libnl3
+        /opt/mellanox/dpdk/include/dpdk
+        /opt/mellanox/dpdk/include/dpdk/x86_64-linux-gnu/dpdk
+        /opt/mellanox/dpdk/include/x86_64-linux-gnu/dpdk
+        /usr/local/cuda/include
 )
 
-# Link directories
-link_directories(
-    ${DOCA_LIBRARY_DIRS}
-    ${DPDK_LIB_DIR}
-    ${DOCA_LIB_DIR}
-    ${CUDA_TOOLKIT_ROOT_DIR}/lib64
+# Find required packages
+find_package(CUDA REQUIRED)
+
+# Find DOCA libraries
+find_library(DOCA_ARGP_LIB doca_argp PATHS /opt/mellanox/doca/lib/x86_64-linux-gnu REQUIRED)
+find_library(DOCA_GPUNETIO_LIB doca_gpunetio PATHS /opt/mellanox/doca/lib/x86_64-linux-gnu REQUIRED)
+find_library(DOCA_GPUNETIO_DEVICE_LIB doca_gpunetio_device PATHS /opt/mellanox/doca/lib/x86_64-linux-gnu REQUIRED)
+find_library(DOCA_ETH_LIB doca_eth PATHS /opt/mellanox/doca/lib/x86_64-linux-gnu REQUIRED)
+find_library(DOCA_DPDK_BRIDGE_LIB doca_dpdk_bridge PATHS /opt/mellanox/doca/lib/x86_64-linux-gnu REQUIRED)
+find_library(DOCA_FLOW_LIB doca_flow PATHS /opt/mellanox/doca/lib/x86_64-linux-gnu REQUIRED)
+find_library(DOCA_FLOW_CT_LIB doca_flow_ct PATHS /opt/mellanox/doca/lib/x86_64-linux-gnu REQUIRED)
+find_library(DOCA_FLOW_TUNE_LIB doca_flow_tune_server PATHS /opt/mellanox/doca/lib/x86_64-linux-gnu REQUIRED)
+find_library(DOCA_COMMON_LIB doca_common PATHS /opt/mellanox/doca/lib/x86_64-linux-gnu REQUIRED)
+
+# 移除重复的源文件
+set(C_SOURCES
+        ${CMAKE_SOURCE_DIR}/config_queues/device.c
+        ${CMAKE_SOURCE_DIR}/config_queues/args.c
+        ${CMAKE_SOURCE_DIR}/config_queues/flow.c
+        ${CMAKE_SOURCE_DIR}/config_queues/http_txbuf.c
+        ${CMAKE_SOURCE_DIR}/config_queues/udp_queues.c
+        ${CMAKE_SOURCE_DIR}/config_queues/tcp_queues.c
+        ${CMAKE_SOURCE_DIR}/config_queues/icmp_queues.c
+        ${CMAKE_SOURCE_DIR}/dpdk_tcp/tcp_cpu_rss_func.c
+        ${CMAKE_SOURCE_DIR}/dpdk_tcp/tcp_session_table.c
+        ${CMAKE_SOURCE_DIR}/common/utils.c
+        ${CMAKE_SOURCE_DIR}/samples/common.c
+        ${CMAKE_SOURCE_DIR}/gpu_packet_processing.c
 )
 
-# Create CUDA object library
-cuda_add_library(gpu_kernels STATIC ${CUDA_SOURCES})
-target_compile_options(gpu_kernels PRIVATE ${CUDA_NVCC_FLAGS})
+set(CUDA_SOURCES
+        ${CMAKE_SOURCE_DIR}/gpu_kernels/receive_tcp.cu
+        ${CMAKE_SOURCE_DIR}/gpu_kernels/receive_udp.cu
+        ${CMAKE_SOURCE_DIR}/gpu_kernels/receive_icmp.cu
+        ${CMAKE_SOURCE_DIR}/gpu_kernels/http_server.cu
+#        ${CMAKE_SOURCE_DIR}/bw/measure_udp_bw.cu
+)
+
+# Create CUDA library for device code
+add_library(gpu_kernels STATIC ${CUDA_SOURCES})
 set_target_properties(gpu_kernels PROPERTIES
-    CUDA_SEPARABLE_COMPILATION ON
-    POSITION_INDEPENDENT_CODE ON
+        CUDA_SEPARABLE_COMPILATION ON
+        POSITION_INDEPENDENT_CODE ON
 )
 
-# Create main executable
-add_executable(doca_gpu_packet_processing ${ALL_SOURCES})
-set_target_properties(doca_gpu_packet_processing PROPERTIES
-    COMPILE_FLAGS "-O3"
-)
+# Create the executable
+add_executable(doca_gpu_packet_processing ${C_SOURCES})
 
 # Link libraries
 target_link_libraries(doca_gpu_packet_processing
-    PRIVATE
         gpu_kernels
+        ${DOCA_ARGP_LIB}
+        ${DOCA_GPUNETIO_LIB}
+        ${DOCA_GPUNETIO_DEVICE_LIB}
+        ${DOCA_ETH_LIB}
+        ${DOCA_DPDK_BRIDGE_LIB}
+        ${DOCA_FLOW_LIB}
+        ${DOCA_FLOW_CT_LIB}
+        ${DOCA_FLOW_TUNE_LIB}
+        ${DOCA_COMMON_LIB}
         resolv
+        cudart
+        cuda
         pthread
-        -L${DOCA_LIB_DIR}
-        -Wl,--whole-archive
-        -ldoca_dpdk_bridge
-        -ldoca_comch
-        -ldoca_eth
-        -ldoca_gpunetio
-        -ldoca_gpunetio_device
-        -Wl,--no-whole-archive
-        ${DOCA_LIBRARIES}
-        -L${DPDK_LIB_DIR}
-        -Wl,--whole-archive
-        -lrte_node
-        -lrte_graph
-        -lrte_flow_perf
-        -lrte_pipeline
-        -lrte_table
-        -lrte_pdump
-        -lrte_port
-        -lrte_fib
-        -lrte_ipsec
-        -lrte_vhost
-        -lrte_stack
-        -lrte_security
-        -lrte_sched
-        -lrte_reorder
-        -lrte_rib
-        -lrte_dmadev
-        -lrte_regexdev
-        -lrte_rawdev
-        -lrte_power
-        -lrte_pcapng
-        -lrte_member
-        -lrte_lpm
-        -lrte_latencystats
-        -lrte_jobstats
-        -lrte_gso
-        -lrte_gro
-        -lrte_gpudev
-        -lrte_eventdev
-        -lrte_efd
-        -lrte_distributor
-        -lrte_cryptodev
-        -lrte_compressdev
-        -lrte_cfgfile
-        -lrte_bpf
-        -lrte_bitratestats
-        -lrte_bbdev
-        -lrte_acl
-        -lrte_timer
-        -lrte_metrics
-        -lrte_cmdline
-        -lrte_pci
-        -lrte_ethdev
-        -lrte_ip_frag
-        -lrte_hash
-        -lrte_meter
-        -lrte_net
-        -lrte_mbuf
-        -lrte_mempool
-        -lrte_rcu
-        -lrte_ring
-        -lrte_eal
-        -lrte_telemetry
-        -lrte_kvargs
-        -Wl,--no-whole-archive
-        -lcuda
-        -lcudart
+        bsd
 )
 
-# Installation
-install(TARGETS doca_gpu_packet_processing
-    RUNTIME DESTINATION bin
+# Set DPDK libraries
+set(DPDK_LIBS
+        rte_node rte_graph rte_flow_perf rte_pipeline rte_table
+        rte_pdump rte_port rte_fib rte_ipsec rte_vhost rte_stack
+        rte_security rte_sched rte_reorder rte_rib rte_dmadev
+        rte_regexdev rte_rawdev rte_power rte_pcapng rte_member
+        rte_lpm rte_latencystats rte_jobstats rte_gso rte_gro
+        rte_gpudev rte_eventdev rte_efd rte_distributor rte_cryptodev
+        rte_compressdev rte_cfgfile rte_bpf rte_bitratestats rte_bbdev
+        rte_acl rte_timer rte_metrics rte_cmdline rte_pci rte_ethdev
+        rte_ip_frag rte_hash rte_meter rte_net rte_mbuf rte_mempool
+        rte_rcu rte_ring rte_eal rte_telemetry rte_kvargs
 )
+
+# Link DPDK libraries
+foreach(lib ${DPDK_LIBS})
+    target_link_libraries(doca_gpu_packet_processing
+            /opt/mellanox/dpdk/lib/x86_64-linux-gnu/lib${lib}.so
+    )
+endforeach()
+
+# Set installation rules
+install(TARGETS doca_gpu_packet_processing
+        RUNTIME DESTINATION bin)
+if(CMAKE_BUILD_TYPE MATCHES Debug)
+    # Add debug symbols
+    add_compile_options(-g)
+
+    # Add CUDA debug options
+    set(CMAKE_CUDA_FLAGS_DEBUG "${CMAKE_CUDA_FLAGS_DEBUG} -G -g")
+
+    # Add sanitizer options if needed
+    if(USE_SANITIZER)
+        add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
+        add_link_options(-fsanitize=address)
+    endif()
+
+    # Add DPDK debug options
+    add_definitions(-DRTE_LOG_LEVEL=RTE_LOG_DEBUG)
+endif()
+
+# 为调试添加源文件信息
+set_target_properties(doca_gpu_packet_processing PROPERTIES
+        COMPILE_FLAGS "-g"
+        CUDA_FLAGS "-g -G"
+)
+
+# 确保调试信息不被优化掉
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0")
+set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -O0")
+set(CMAKE_CUDA_FLAGS_DEBUG "${CMAKE_CUDA_FLAGS_DEBUG} -O0")

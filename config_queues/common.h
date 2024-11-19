@@ -480,6 +480,9 @@ doca_error_t kernel_receive_tcp(cudaStream_t stream,
  */
 doca_error_t kernel_receive_udp(cudaStream_t stream, uint32_t *exit_cond, struct rxq_udp_queues *udp_queues);
 
+
+
+
 /*
  * Launch a CUDA kernel to specifically receive ICMP packets.
  *
