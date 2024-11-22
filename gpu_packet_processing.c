@@ -496,6 +496,7 @@ int main(int argc, char **argv)
 
 		/* Start the CPU RSS threads to address new TCP connections */
 		tcp_queues.lcore_idx_start = rte_get_next_lcore(current_lcore, true, false);
+		DOCA_LOG_INFO("the rss queue number is %d",tcp_queues.numq_cpu_rss);
 		for (int i = 0; i < tcp_queues.numq_cpu_rss; i++) {
 			current_lcore = rte_get_next_lcore(current_lcore, true, false);
 			if (rte_eal_remote_launch(tcp_cpu_rss_func, &tcp_queues, current_lcore) != 0) {

@@ -47,6 +47,8 @@
  */
 int tcp_cpu_rss_func(void *args);
 
+int tcp_cpu_rss_func_bw(void *args);
+
 /*
  * Extract the address of the IPv4 TCP header contained in the
  * raw ethernet frame packet buffer if present; otherwise null.

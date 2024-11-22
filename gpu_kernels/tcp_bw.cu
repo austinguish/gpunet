@@ -123,7 +123,6 @@ __global__ void cuda_kernel_tcp_bw(uint32_t* exit_cond, struct doca_gpu_eth_rxq*
     while (DOCA_GPUNETIO_VOLATILE(*exit_cond)==0)
     {
         ret = doca_gpu_dev_eth_rxq_receive_block(rxq, MAX_RX_NUM_PKTS, MAX_RX_TIMEOUT_NS, &rx_pkt_num, &rx_buf_idx);
-
         if (ret != DOCA_SUCCESS)
         {
             if (lane_id == 0)

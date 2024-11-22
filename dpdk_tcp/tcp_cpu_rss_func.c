@@ -28,18 +28,19 @@
 
 DOCA_LOG_REGISTER(TCP_CPU_RSS);
 
-int tcp_cpu_rss_func(void *lcore_args)
+int tcp_cpu_rss_func_bw(void *lcore_args)
 {
 	struct rte_mbuf **rx_packets;
 	struct rte_mbuf **tx_packets;
 	uint32_t num_tx_packets = 0;
 	uint16_t port_id = DPDK_DEFAULT_PORT;
-	const struct rxq_tcp_queues *tcp_queues = lcore_args;
+	// type conversion issue
+	const struct tcp_bw_queues *tcp_queues = lcore_args;
 	struct rte_mbuf *ack;
 	int num_sent;
 	doca_error_t result;
 	uint16_t queue_id;
-
+	DOCA_LOG_INFO("Launching TCP CPU RSS function");
 	if (tcp_queues == NULL) {
 		DOCA_LOG_ERR("%s: 'tcp_queues argument cannot be NULL", __func__);
 		DOCA_GPUNETIO_VOLATILE(force_quit) = true;
@@ -57,6 +58,119 @@ int tcp_cpu_rss_func(void *lcore_args)
 	}
 
 	queue_id = rte_lcore_index(rte_lcore_id()) - tcp_queues->lcore_idx_start;
+	DOCA_LOG_INFO("lcore_idx_start %d,queue_id %d",tcp_queues->lcore_idx_start,queue_id);
+
+	rx_packets = (struct rte_mbuf **)calloc(TCP_PACKET_MAX_BURST_SIZE, sizeof(struct rte_mbuf *));
+	if (rx_packets == NULL) {
+		DOCA_LOG_ERR("No memory available to allocate DPDK rx packets");
+		return -1;
+	}
+
+	tx_packets = (struct rte_mbuf **)calloc(TCP_PACKET_MAX_BURST_SIZE, sizeof(struct rte_mbuf *));
+	if (tx_packets == NULL) {
+		free(rx_packets);
+		DOCA_LOG_ERR("No memory available to allocate DPDK tx packets");
+		return -1;
+	}
+
+	DOCA_LOG_INFO("Core %u is performing TCP SYN/FIN processing on queue %u", rte_lcore_id(), queue_id);
+
+	/* read global force_quit */
+	while (DOCA_GPUNETIO_VOLATILE(force_quit) == false) {
+		int num_rx_packets = rte_eth_rx_burst(port_id, queue_id, rx_packets, TCP_PACKET_MAX_BURST_SIZE);
+
+		for (int i = 0; i < num_rx_packets; i++) {
+			const struct rte_mbuf *pkt = rx_packets[i];
+			const struct rte_tcp_hdr *tcp_hdr = extract_tcp_hdr(pkt);
+
+			if (!tcp_hdr) {
+				DOCA_LOG_WARN("Not a TCP packet");
+				continue;
+			}
+
+			if (!tcp_hdr->syn && !tcp_hdr->fin && !tcp_hdr->rst) {
+				DOCA_LOG_WARN("Unexpected TCP packet flags: 0x%x, expected SYN/RST/FIN",
+					      tcp_hdr->tcp_flags);
+				continue;
+			}
+
+			if (tcp_hdr->rst) {
+				log_tcp_flag(pkt, "RST");
+				destroy_tcp_session(queue_id, pkt, tcp_queues->port);
+				continue; // Do not bother to ack
+			} else if (tcp_hdr->fin) {
+				log_tcp_flag(pkt, "FIN");
+				destroy_tcp_session(queue_id, pkt, tcp_queues->port);
+				printf("destroyed a tcp session\n");
+			} else if (tcp_hdr->syn) {
+				log_tcp_flag(pkt, "SYN");
+				DOCA_LOG_INFO("received a SYN packet");
+				result = create_tcp_session(queue_id, pkt, tcp_queues->port, tcp_queues->rxq_pipe_gpu);
+				if (result != DOCA_SUCCESS)
+					goto error;
+			} else {
+				DOCA_LOG_WARN("Unexpected TCP packet flags: 0x%x, expected SYN/RST/FIN",
+					      tcp_hdr->tcp_flags);
+				continue;
+			}
+
+			ack = create_ack_packet(pkt, tcp_queues->tcp_ack_pkt_pool);
+			if (ack)
+				tx_packets[num_tx_packets++] = ack;
+		}
+
+		while (num_tx_packets > 0) {
+			num_sent = rte_eth_tx_burst(port_id, queue_id, tx_packets, num_tx_packets);
+			DOCA_LOG_DBG("DPDK tx_burst sent %d packets", num_sent);
+			num_tx_packets -= num_sent;
+		}
+
+		for (int i = 0; i < num_rx_packets; i++)
+			rte_pktmbuf_free(rx_packets[i]);
+	}
+
+	free(rx_packets);
+	free(tx_packets);
+
+	return 0;
+error:
+
+	free(rx_packets);
+	free(tx_packets);
+
+	return -1;
+}
+int tcp_cpu_rss_func(void *lcore_args)
+{
+	struct rte_mbuf **rx_packets;
+	struct rte_mbuf **tx_packets;
+	uint32_t num_tx_packets = 0;
+	uint16_t port_id = DPDK_DEFAULT_PORT;
+	// type conversion issue
+	const struct rxq_tcp_queues *tcp_queues = lcore_args;
+	struct rte_mbuf *ack;
+	int num_sent;
+	doca_error_t result;
+	uint16_t queue_id;
+	DOCA_LOG_INFO("Launching TCP CPU RSS function");
+	if (tcp_queues == NULL) {
+		DOCA_LOG_ERR("%s: 'tcp_queues argument cannot be NULL", __func__);
+		DOCA_GPUNETIO_VOLATILE(force_quit) = true;
+		return -1;
+	}
+	if (tcp_queues->port == NULL) {
+		DOCA_LOG_ERR("%s: 'tcp_queues->port argument cannot be NULL", __func__);
+		DOCA_GPUNETIO_VOLATILE(force_quit) = true;
+		return -1;
+	}
+	if (tcp_queues->rxq_pipe_gpu == NULL) {
+		DOCA_LOG_ERR("%s: 'tcp_queues->rxq_pipe_gpu argument cannot be NULL", __func__);
+		DOCA_GPUNETIO_VOLATILE(force_quit) = true;
+		return -1;
+	}
+
+	queue_id = rte_lcore_index(rte_lcore_id()) - tcp_queues->lcore_idx_start;
+	DOCA_LOG_INFO("lcore_idx_start %d,queue_id %d",tcp_queues->lcore_idx_start,queue_id);
 
 	rx_packets = (struct rte_mbuf **)calloc(TCP_PACKET_MAX_BURST_SIZE, sizeof(struct rte_mbuf *));
 	if (rx_packets == NULL) {
@@ -104,6 +218,7 @@ int tcp_cpu_rss_func(void *lcore_args)
 				log_tcp_flag(pkt, "SYN");
 				result = create_tcp_session(queue_id, pkt, tcp_queues->port, tcp_queues->rxq_pipe_gpu);
 				printf("created a tcp session\n");
+				DOCA_LOG_INFO("received a SYN packet");
 				if (result != DOCA_SUCCESS)
 					goto error;
 			} else {

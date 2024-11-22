@@ -155,7 +155,9 @@ struct tcp_bw_queues
     struct doca_dev *ddev;                      /* DOCA device */
     struct doca_flow_port *port;                /* DOCA flow port */
     uint32_t numq;                              /* Number of queues */
-
+    uint16_t lcore_idx_start; /* Map queues [0 .. numq] to [lcore_idx_start .. lcore_idx_start+numq] */
+    struct rte_mempool* tcp_ack_pkt_pool; /* Memory pool shared by RSS cores to respond with TCP ACKs */
+    uint16_t numq_cpu_rss;
     /* Receive queues */
     struct doca_eth_rxq *eth_rxq_cpu[MAX_QUEUES];  /* CPU RX queue handles */
     struct doca_gpu_eth_rxq *eth_rxq_gpu[MAX_QUEUES];  /* GPU RX queue handles */

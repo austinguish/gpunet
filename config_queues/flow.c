@@ -723,7 +723,7 @@ doca_error_t create_tcp_bw_pipe(struct tcp_bw_queues *tcp_ack_queues, struct doc
         goto destroy_pipe_cfg;
     }
 
-    result = doca_flow_pipe_cfg_set_is_root(pipe_cfg, true); // 设为root pipe
+    result = doca_flow_pipe_cfg_set_is_root(pipe_cfg, false); // root pipe?
     if (result != DOCA_SUCCESS) {
         DOCA_LOG_ERR("Failed to set root status: %s", doca_error_get_descr(result));
         goto destroy_pipe_cfg;
@@ -741,7 +741,7 @@ doca_error_t create_tcp_bw_pipe(struct tcp_bw_queues *tcp_ack_queues, struct doc
         goto destroy_pipe_cfg;
     }
 
-    // 创建管道
+    // create pipe
     result = doca_flow_pipe_create(pipe_cfg, &fwd, &miss_fwd, &tcp_ack_queues->rxq_pipe_cpu);
     if (result != DOCA_SUCCESS) {
         DOCA_LOG_ERR("CPU pipe creation failed: %s", doca_error_get_descr(result));
@@ -781,6 +781,11 @@ doca_error_t create_tcp_gpu_bw_pipe(struct tcp_bw_queues *tcp_ack_queues, struct
             .tcp.flags = TCP_FLAG_ACK, // 只处理带ACK标志的数据包
         }
     };
+
+	match.outer.ip4.src_ip = 0xffffffff;
+	match.outer.ip4.dst_ip = 0xffffffff;
+	match.outer.tcp.l4_port.src_port = 0xffff;
+	match.outer.tcp.l4_port.dst_port = 0xffff;
 
     // 设置RSS队列
     for (int idx = 0; idx < tcp_ack_queues->numq; idx++) {
@@ -1221,6 +1226,7 @@ doca_error_t create_tcp_bw_root_pipe(struct tcp_bw_queues *tcp_ack_queues, struc
 
     // 8. 处理所有条目
     result = doca_flow_entries_process(port, 0, 0, 0);
+	// DOCA_LOG_INFO("already set the root	pipe");
     if (result != DOCA_SUCCESS) {
         DOCA_LOG_ERR("Failed to process entries: %s", doca_error_get_descr(result));
         return result; // 需要清理所有条目

@@ -6,7 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <rte_ethdev.h>
-
+#include<dpdk_tcp/tcp_cpu_rss_func.h>
 #include "common.h"
 #include "dpdk_tcp/tcp_session_table.h"
 
@@ -79,6 +79,8 @@ static void signal_handler(int signum)
 
 int main(int argc, char **argv)
 {
+
+    int current_lcore = 0;
     doca_error_t result;
     int cuda_id;
     cudaError_t cuda_ret;
@@ -180,6 +182,9 @@ int main(int argc, char **argv)
         DOCA_LOG_ERR("Failed to create TCP BW queues: %s", doca_error_get_descr(result));
         return EXIT_FAILURE;
     }
+    // create tcp_bw_gpu_queues
+
+
 
     /* Create root pipe for TCP processing */
     result = create_tcp_bw_root_pipe(&tcp_bw_queues, df_port);
@@ -213,11 +218,35 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
     *cpu_exit_condition = 0;
-
     /* Launch main processing kernel */
     DOCA_LOG_INFO("Launching TCP BW processing kernel");
     kernel_tcp_bw_test(rx_stream, gpu_exit_condition, &tcp_bw_queues);
+    tcp_bw_queues.tcp_ack_pkt_pool = rte_pktmbuf_pool_create("tcp_ack_pkt_pool",
+                                  1023,
+                                  0,
+                                  0,
+                                  RTE_MBUF_DEFAULT_BUF_SIZE,
+                                  rte_socket_id());
+    if (!tcp_bw_queues.tcp_ack_pkt_pool) {
+        DOCA_LOG_ERR("%s: failed to allocate tcp-ack packet pool", __func__);
+        goto exit;
+    }
+    DOCA_LOG_INFO("allocate the pool successfully");
 
+    /* 启动CPU RSS线程来处理新的TCP连接 */
+    current_lcore = rte_get_next_lcore(-1, true, false);
+    tcp_bw_queues.lcore_idx_start = 2;
+    DOCA_LOG_INFO("lcore_idx_start:%d",current_lcore);
+    /* 为每个CPU RSS队列启动一个线程 */
+    for (int i = 0; i < tcp_bw_queues.numq_cpu_rss; i++) {
+        current_lcore = rte_get_next_lcore(current_lcore, true, false);
+        DOCA_LOG_INFO("current lcore is :%d",current_lcore);
+        if (rte_eal_remote_launch(tcp_cpu_rss_func_bw, &tcp_bw_queues, current_lcore) != 0) {
+            DOCA_LOG_ERR("Remote launch failed");
+            return EXIT_FAILURE;
+        }
+    }
+    DOCA_LOG_DBG("CPU RSS threads started");
     /* Main processing loop */
     while (DOCA_GPUNETIO_VOLATILE(force_quit) == false) {
         doca_pe_progress(pe);
@@ -233,6 +262,7 @@ int main(int argc, char **argv)
     DOCA_LOG_INFO("GPU work ended");
 
     /* Clean up DOCA resources */
+    exit:
     result = destroy_tcp_bw_queues(&tcp_bw_queues);
     if (result != DOCA_SUCCESS) {
         DOCA_LOG_ERR("Failed to destroy TCP BW queues: %s", doca_error_get_descr(result));
