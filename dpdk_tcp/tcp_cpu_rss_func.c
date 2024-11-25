@@ -105,7 +105,7 @@ int tcp_cpu_rss_func_bw(void *lcore_args)
 				printf("destroyed a tcp session\n");
 			} else if (tcp_hdr->syn) {
 				log_tcp_flag(pkt, "SYN");
-				DOCA_LOG_INFO("received a SYN packet");
+				DOCA_LOG_INFO("received a SYN packet,trying to offload to gpu");
 				result = create_tcp_session(queue_id, pkt, tcp_queues->port, tcp_queues->rxq_pipe_gpu);
 				if (result != DOCA_SUCCESS)
 					goto error;

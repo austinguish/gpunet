@@ -652,112 +652,120 @@ destroy_pipe_cfg:
 doca_error_t create_tcp_bw_pipe(struct tcp_bw_queues *tcp_ack_queues, struct doca_flow_port *port)
 {
     doca_error_t result;
-    uint16_t rss_queues[MAX_QUEUES];
-    struct doca_flow_match match_mask = {0};
+	uint16_t rss_queues[MAX_QUEUES];
+	struct doca_flow_match match_mask = {0};
 
-    /*
-     * Setup CPU pipe to handle:
-     * 1. Connection management (SYN/FIN/RST)
-     * 2. Unrecognized flows
-     */
+	/*
+	 * Setup the TCP pipe 'rxq_pipe_cpu' which forwards unrecognized flows and
+	 * TCP SYN/ACK/FIN flags to the CPU - in other words, any TCP packets not
+	 * recognized by the GPU TCP pipe.
+	 */
 
-    if (tcp_ack_queues == NULL || port == NULL)
-        return DOCA_ERROR_INVALID_VALUE;
+	if (tcp_ack_queues == NULL || port == NULL)
+		return DOCA_ERROR_INVALID_VALUE;
 
-    /* Initialize TCP connection table */
-    tcp_session_table = rte_hash_create(&tcp_session_ht_params);
-	struct doca_flow_match tcp_ctrl_match_mask = {
-		.outer.tcp.flags = DOCA_FLOW_MATCH_TCP_FLAG_SYN,  // mask标识哪些位需要匹配
+	/* Init TCP session table */
+	tcp_session_table = rte_hash_create(&tcp_session_ht_params);
+
+	struct doca_flow_match match = {.outer = {
+						.l3_type = DOCA_FLOW_L3_TYPE_IP4,
+						.l4_type_ext = DOCA_FLOW_L4_TYPE_EXT_TCP,
+					}};
+
+	for (int idx = 0; idx < tcp_ack_queues->numq_cpu_rss; idx++)
+		rss_queues[idx] = idx;
+
+	struct doca_flow_fwd fwd = {
+		.type = DOCA_FLOW_FWD_RSS,
+		.rss_outer_flags = DOCA_FLOW_RSS_IPV4 | DOCA_FLOW_RSS_TCP,
+		.rss_queues = rss_queues,
+		.num_of_queues = tcp_ack_queues->numq_cpu_rss,
 	};
-    struct doca_flow_match match = {
-        .outer = {
-            .l3_type = DOCA_FLOW_L3_TYPE_IP4,
-            .l4_type_ext = DOCA_FLOW_L4_TYPE_EXT_TCP,
-            /* Match TCP control flags */
-            .tcp.flags = DOCA_FLOW_MATCH_TCP_FLAG_SYN
-        }
-    };
-	//todo add other flags
 
-    /* Set up RSS queues for CPU processing */
-    for (int idx = 0; idx < tcp_ack_queues->numq; idx++)
-        rss_queues[idx] = idx;
+	struct doca_flow_fwd miss_fwd = {
+		.type = DOCA_FLOW_FWD_DROP,
+	};
 
-    struct doca_flow_fwd fwd = {
-        .type = DOCA_FLOW_FWD_RSS,
-        .rss_outer_flags = DOCA_FLOW_RSS_IPV4 | DOCA_FLOW_RSS_TCP,
-        .rss_queues = rss_queues,
-        .num_of_queues = tcp_ack_queues->numq,
-    };
+	struct doca_flow_monitor monitor = {
+		.counter_type = DOCA_FLOW_RESOURCE_TYPE_NON_SHARED,
+	};
 
-    struct doca_flow_fwd miss_fwd = {
-        .type = DOCA_FLOW_FWD_DROP,
-    };
+	struct doca_flow_pipe_cfg *pipe_cfg;
+	const char *pipe_name = "CPU_RXQ_TCP_PIPE";
 
-    struct doca_flow_monitor monitor = {
-        .counter_type = DOCA_FLOW_RESOURCE_TYPE_NON_SHARED,
-    };
+	result = doca_flow_pipe_cfg_create(&pipe_cfg, port);
+	if (result != DOCA_SUCCESS) {
+		DOCA_LOG_ERR("Failed to create doca_flow_pipe_cfg: %s", doca_error_get_descr(result));
+		return result;
+	}
 
-    struct doca_flow_pipe_cfg *pipe_cfg;
-    const char *pipe_name = "CPU_TCP_ACK_PIPE";
+	result = doca_flow_pipe_cfg_set_name(pipe_cfg, pipe_name);
+	if (result != DOCA_SUCCESS) {
+		DOCA_LOG_ERR("Failed to set doca_flow_pipe_cfg name: %s", doca_error_get_descr(result));
+		goto destroy_pipe_cfg;
+	}
+	result = doca_flow_pipe_cfg_set_enable_strict_matching(pipe_cfg, true);
+	if (result != DOCA_SUCCESS) {
+		DOCA_LOG_ERR("Failed to set doca_flow_pipe_cfg enable_strict_matching: %s",
+			     doca_error_get_descr(result));
+		goto destroy_pipe_cfg;
+	}
+	result = doca_flow_pipe_cfg_set_type(pipe_cfg, DOCA_FLOW_PIPE_BASIC);
+	if (result != DOCA_SUCCESS) {
+		DOCA_LOG_ERR("Failed to set doca_flow_pipe_cfg type: %s", doca_error_get_descr(result));
+		goto destroy_pipe_cfg;
+	}
+	result = doca_flow_pipe_cfg_set_is_root(pipe_cfg, false);
+	if (result != DOCA_SUCCESS) {
+		DOCA_LOG_ERR("Failed to set doca_flow_pipe_cfg is_root: %s", doca_error_get_descr(result));
+		goto destroy_pipe_cfg;
+	}
+	result = doca_flow_pipe_cfg_set_match(pipe_cfg, &match, &match_mask);
+	if (result != DOCA_SUCCESS) {
+		DOCA_LOG_ERR("Failed to set doca_flow_pipe_cfg match: %s", doca_error_get_descr(result));
+		goto destroy_pipe_cfg;
+	}
+	result = doca_flow_pipe_cfg_set_monitor(pipe_cfg, &monitor);
+	if (result != DOCA_SUCCESS) {
+		DOCA_LOG_ERR("Failed to set doca_flow_pipe_cfg monitor: %s", doca_error_get_descr(result));
+		goto destroy_pipe_cfg;
+	}
 
-    result = doca_flow_pipe_cfg_create(&pipe_cfg, port);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to create CPU pipe config: %s", doca_error_get_descr(result));
-        return result;
-    }
+	result = doca_flow_pipe_create(pipe_cfg, &fwd, &miss_fwd, &tcp_ack_queues->rxq_pipe_cpu);
+	if (result != DOCA_SUCCESS) {
+		DOCA_LOG_ERR("RxQ pipe creation failed with: %s", doca_error_get_descr(result));
+		goto destroy_pipe_cfg;
+	}
 
-    // 设置管道配置
-    result = doca_flow_pipe_cfg_set_name(pipe_cfg, pipe_name);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to set pipe name: %s", doca_error_get_descr(result));
-        goto destroy_pipe_cfg;
-    }
+	doca_flow_pipe_cfg_destroy(pipe_cfg);
 
-    result = doca_flow_pipe_cfg_set_enable_strict_matching(pipe_cfg, true);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to enable strict matching: %s", doca_error_get_descr(result));
-        goto destroy_pipe_cfg;
-    }
+	result = doca_flow_pipe_add_entry(0,
+					  tcp_ack_queues->rxq_pipe_cpu,
+					  NULL,
+					  NULL,
+					  NULL,
+					  NULL,
+					  DOCA_FLOW_NO_WAIT,
+					  NULL,
+					  &tcp_ack_queues->cpu_rss_entry);
+	if (result != DOCA_SUCCESS) {
+		DOCA_LOG_ERR("RxQ pipe entry creation failed with: %s", doca_error_get_descr(result));
+		return result;
+	}
 
-    result = doca_flow_pipe_cfg_set_type(pipe_cfg, DOCA_FLOW_PIPE_BASIC);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to set pipe type: %s", doca_error_get_descr(result));
-        goto destroy_pipe_cfg;
-    }
+	result = doca_flow_entries_process(port, 0, default_flow_timeout_usec, 0);
+	if (result != DOCA_SUCCESS) {
+		DOCA_LOG_ERR("RxQ pipe entry process failed with: %s", doca_error_get_descr(result));
+		return result;
+	}
 
-    result = doca_flow_pipe_cfg_set_is_root(pipe_cfg, false); // root pipe?
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to set root status: %s", doca_error_get_descr(result));
-        goto destroy_pipe_cfg;
-    }
+	DOCA_LOG_DBG("Created Pipe %s", pipe_name);
 
-    result = doca_flow_pipe_cfg_set_match(pipe_cfg, &match, &match_mask);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to set match: %s", doca_error_get_descr(result));
-        goto destroy_pipe_cfg;
-    }
-
-    result = doca_flow_pipe_cfg_set_monitor(pipe_cfg, &monitor);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to set monitor: %s", doca_error_get_descr(result));
-        goto destroy_pipe_cfg;
-    }
-
-    // create pipe
-    result = doca_flow_pipe_create(pipe_cfg, &fwd, &miss_fwd, &tcp_ack_queues->rxq_pipe_cpu);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("CPU pipe creation failed: %s", doca_error_get_descr(result));
-        goto destroy_pipe_cfg;
-    }
-
-    doca_flow_pipe_cfg_destroy(pipe_cfg);
-
-    return DOCA_SUCCESS;
+	return DOCA_SUCCESS;
 
 destroy_pipe_cfg:
-    doca_flow_pipe_cfg_destroy(pipe_cfg);
-    return result;
+	doca_flow_pipe_cfg_destroy(pipe_cfg);
+	return result;
 }
 
 doca_error_t create_tcp_gpu_bw_pipe(struct tcp_bw_queues *tcp_ack_queues, struct doca_flow_port *port)

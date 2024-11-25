@@ -180,6 +180,7 @@ struct tcp_bw_queues
     struct doca_flow_pipe_entry *cpu_rss_entry;    /* CPU RSS entry */
     struct doca_flow_pipe_entry* root_tcp_entry_gpu; /* DOCA Flow root entry */
     struct doca_flow_pipe_entry* root_tcp_entry_cpu[3]; /* DOCA Flow root entry */
+    struct tx_buf buf_response;
 
 };
 

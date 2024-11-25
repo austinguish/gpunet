@@ -297,6 +297,19 @@ doca_error_t create_tcp_bw_queues(struct tcp_bw_queues* tcp_ack_queues,
             return DOCA_ERROR_BAD_STATE;
         }
     }
+    //allocate txbuf on the gpu
+    result = create_tx_buf(&tcp_ack_queues->buf_response,
+                           tcp_ack_queues->gpu_dev,
+                           tcp_ack_queues->ddev,
+                           TX_BUF_NUM,
+                           TX_BUF_MAX_SZ);
+    if (result != DOCA_SUCCESS)
+    {
+        DOCA_LOG_ERR("Failed create buf_page_index: %s", doca_error_get_descr(result));
+        destroy_tcp_bw_queues(tcp_ack_queues);
+        return DOCA_ERROR_BAD_STATE;
+    }
+
 
     result = create_tcp_bw_pipe(tcp_ack_queues, df_port);
     if (result != DOCA_SUCCESS)
@@ -329,19 +342,22 @@ doca_error_t destroy_tcp_bw_queues(struct tcp_bw_queues* tcp_ack_queues)
     }
 
     // First destroy all flows and pipes to prevent queue references
-    if (tcp_ack_queues->rxq_pipe_gpu) {
+    if (tcp_ack_queues->rxq_pipe_gpu)
+    {
         doca_flow_pipe_destroy(tcp_ack_queues->rxq_pipe_gpu);
         tcp_ack_queues->rxq_pipe_gpu = NULL;
     }
 
-    if (tcp_ack_queues->rxq_pipe_cpu) {
+    if (tcp_ack_queues->rxq_pipe_cpu)
+    {
         doca_flow_pipe_destroy(tcp_ack_queues->rxq_pipe_cpu);
         tcp_ack_queues->rxq_pipe_cpu = NULL;
     }
 
     // Wait for all pending operations to complete
     result = doca_flow_entries_process(tcp_ack_queues->port, 0, NULL, NULL);
-    if (result != DOCA_SUCCESS) {
+    if (result != DOCA_SUCCESS)
+    {
         DOCA_LOG_ERR("Failed to process pending flow operations: %s", doca_error_get_descr(result));
         return DOCA_ERROR_BAD_STATE;
     }
@@ -426,6 +442,12 @@ doca_error_t destroy_tcp_bw_queues(struct tcp_bw_queues* tcp_ack_queues)
             }
             tcp_ack_queues->gpu_pkt_addr[idx] = NULL;
         }
+    }
+    result = destroy_tx_buf(&tcp_ack_queues->buf_response);
+    if (result != DOCA_SUCCESS)
+    {
+        DOCA_LOG_ERR("Failed create buf_page_index: %s", doca_error_get_descr(result));
+        return DOCA_ERROR_BAD_STATE;
     }
 
     return DOCA_SUCCESS;
