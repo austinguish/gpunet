@@ -96,6 +96,7 @@ int tcp_cpu_rss_func_bw(void *lcore_args)
 
 			if (tcp_hdr->rst) {
 				log_tcp_flag(pkt, "RST");
+				DOCA_LOG_INFO("received a RST packet");
 				destroy_tcp_session(queue_id, pkt, tcp_queues->port);
 				continue; // Do not bother to ack
 			} else if (tcp_hdr->fin) {

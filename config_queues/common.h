@@ -174,9 +174,12 @@ struct tcp_bw_queues
     int dmabuf_fd[MAX_QUEUES];                     /* DMA buffer file descriptors */
 
     /* Flow pipes */
+    struct doca_flow_pipe *root_pipe;
     struct doca_flow_pipe *rxq_pipe_cpu;           /* CPU pipe for connection handling */
     struct doca_flow_pipe *rxq_pipe_gpu;           /* GPU pipe for ACK processing */
     struct doca_flow_pipe_entry *cpu_rss_entry;    /* CPU RSS entry */
+    struct doca_flow_pipe_entry* root_tcp_entry_gpu; /* DOCA Flow root entry */
+    struct doca_flow_pipe_entry* root_tcp_entry_cpu[3]; /* DOCA Flow root entry */
 
 };
 

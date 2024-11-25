@@ -186,12 +186,13 @@ int main(int argc, char **argv)
 
 
 
-    /* Create root pipe for TCP processing */
+    // /* Create root pipe for TCP processing */
     result = create_tcp_bw_root_pipe(&tcp_bw_queues, df_port);
     if (result != DOCA_SUCCESS) {
         DOCA_LOG_ERR("Failed to create TCP BW root pipe: %s", doca_error_get_descr(result));
         return EXIT_FAILURE;
     }
+    DOCA_LOG_INFO("successfully create the root pipe");
 
     /* Set up signal handlers */
     DOCA_GPUNETIO_VOLATILE(force_quit) = false;
@@ -217,6 +218,7 @@ int main(int argc, char **argv)
         DOCA_LOG_ERR("Failed to allocate GPU memory: %s", doca_error_get_descr(result));
         return EXIT_FAILURE;
     }
+    DOCA_LOG_INFO("successfully to allocate memory on gpu");
     *cpu_exit_condition = 0;
     /* Launch main processing kernel */
     DOCA_LOG_INFO("Launching TCP BW processing kernel");

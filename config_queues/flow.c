@@ -666,15 +666,18 @@ doca_error_t create_tcp_bw_pipe(struct tcp_bw_queues *tcp_ack_queues, struct doc
 
     /* Initialize TCP connection table */
     tcp_session_table = rte_hash_create(&tcp_session_ht_params);
-
+	struct doca_flow_match tcp_ctrl_match_mask = {
+		.outer.tcp.flags = DOCA_FLOW_MATCH_TCP_FLAG_SYN,  // mask标识哪些位需要匹配
+	};
     struct doca_flow_match match = {
         .outer = {
             .l3_type = DOCA_FLOW_L3_TYPE_IP4,
             .l4_type_ext = DOCA_FLOW_L4_TYPE_EXT_TCP,
             /* Match TCP control flags */
-            .tcp.flags = TCP_FLAG_SYN | TCP_FLAG_FIN | TCP_FLAG_RST,
+            .tcp.flags = DOCA_FLOW_MATCH_TCP_FLAG_SYN
         }
     };
+	//todo add other flags
 
     /* Set up RSS queues for CPU processing */
     for (int idx = 0; idx < tcp_ack_queues->numq; idx++)
@@ -1115,14 +1118,16 @@ doca_error_t create_root_pipe(struct rxq_udp_queues *udp_queues,
 
 doca_error_t create_tcp_bw_root_pipe(struct tcp_bw_queues *tcp_ack_queues, struct doca_flow_port *port)
 {
+    uint32_t priority_high = 1;
+    uint32_t priority_low = 3;
     struct doca_flow_pipe_cfg *pipe_cfg = NULL;
-    struct doca_flow_pipe *root_pipe = NULL;
-    struct doca_flow_pipe_entry *ctrl_entry = NULL;
-    struct doca_flow_pipe_entry *data_entry = NULL;
-    struct doca_flow_pipe_entry *drop_entry = NULL;
     doca_error_t result;
+    struct doca_flow_match match_mask = {0};
+    struct doca_flow_monitor monitor = {
+        .counter_type = DOCA_FLOW_RESOURCE_TYPE_NON_SHARED,
+    };
 
-    // 1. 参数检查 - 直接返回，因为还没有分配资源
+    // 1. 验证参数
     if (tcp_ack_queues == NULL || port == NULL) {
         DOCA_LOG_ERR("Invalid arguments");
         return DOCA_ERROR_INVALID_VALUE;
@@ -1132,116 +1137,149 @@ doca_error_t create_tcp_bw_root_pipe(struct tcp_bw_queues *tcp_ack_queues, struc
     result = doca_flow_pipe_cfg_create(&pipe_cfg, port);
     if (result != DOCA_SUCCESS) {
         DOCA_LOG_ERR("Failed to create pipe cfg: %s", doca_error_get_descr(result));
-        return result;  // 第一个资源分配，失败直接返回
+        return result;
     }
 
     // 3. 设置pipe基本配置
     result = doca_flow_pipe_cfg_set_name(pipe_cfg, "TCP_BW_ROOT_PIPE");
     if (result != DOCA_SUCCESS) {
         DOCA_LOG_ERR("Failed to set pipe name: %s", doca_error_get_descr(result));
-        goto destroy_pipe_cfg;  // 需要清理pipe_cfg
+        goto cleanup_cfg;
     }
 
     result = doca_flow_pipe_cfg_set_type(pipe_cfg, DOCA_FLOW_PIPE_CONTROL);
     if (result != DOCA_SUCCESS) {
         DOCA_LOG_ERR("Failed to set pipe type: %s", doca_error_get_descr(result));
-        goto destroy_pipe_cfg;
+        goto cleanup_cfg;
     }
 
     result = doca_flow_pipe_cfg_set_is_root(pipe_cfg, true);
     if (result != DOCA_SUCCESS) {
         DOCA_LOG_ERR("Failed to set root status: %s", doca_error_get_descr(result));
-        goto destroy_pipe_cfg;
+        goto cleanup_cfg;
     }
 
     result = doca_flow_pipe_cfg_set_enable_strict_matching(pipe_cfg, true);
     if (result != DOCA_SUCCESS) {
         DOCA_LOG_ERR("Failed to enable strict matching: %s", doca_error_get_descr(result));
-        goto destroy_pipe_cfg;
+        goto cleanup_cfg;
+    }
+
+    result = doca_flow_pipe_cfg_set_match(pipe_cfg, NULL, &match_mask);
+    if (result != DOCA_SUCCESS) {
+        DOCA_LOG_ERR("Failed to set match: %s", doca_error_get_descr(result));
+        goto cleanup_cfg;
+    }
+
+    result = doca_flow_pipe_cfg_set_monitor(pipe_cfg, &monitor);
+    if (result != DOCA_SUCCESS) {
+        DOCA_LOG_ERR("Failed to set monitor: %s", doca_error_get_descr(result));
+        goto cleanup_cfg;
     }
 
     // 4. 创建root pipe
-    result = doca_flow_pipe_create(pipe_cfg, NULL, NULL, &root_pipe);
+    result = doca_flow_pipe_create(pipe_cfg, NULL, NULL, &tcp_ack_queues->root_pipe);
     if (result != DOCA_SUCCESS) {
         DOCA_LOG_ERR("Root pipe creation failed: %s", doca_error_get_descr(result));
-        goto destroy_pipe_cfg;  // 只需要清理pipe_cfg
+        goto cleanup_cfg;
     }
 
-    // 5. 创建TCP控制包规则（高优先级）
-    struct doca_flow_match tcp_ctrl_match = {
-        .outer = {
-            .l3_type = DOCA_FLOW_L3_TYPE_IP4,
-            .l4_type_ext = DOCA_FLOW_L4_TYPE_EXT_TCP,
-            .tcp.flags = TCP_FLAG_SYN | TCP_FLAG_FIN | TCP_FLAG_RST,
+    // 可以安全释放pipe_cfg了,因为pipe已经创建成功
+    doca_flow_pipe_cfg_destroy(pipe_cfg);
+
+    // 5. 创建GPU的TCP规则（低优先级）
+    if (tcp_ack_queues->rxq_pipe_gpu) {
+        struct doca_flow_match tcp_match_gpu = {
+            .outer = {
+                .l3_type = DOCA_FLOW_L3_TYPE_IP4,
+                .l4_type_ext = DOCA_FLOW_L4_TYPE_EXT_TCP,
+            }
+        };
+        struct doca_flow_match tcp_match_gpu_mask = {
+            .outer = {
+                .l3_type = DOCA_FLOW_L3_TYPE_IP4,
+                .l4_type_ext = DOCA_FLOW_L4_TYPE_EXT_TCP,
+                .tcp.flags = 0
+            }
+        };
+        struct doca_flow_fwd tcp_fwd_gpu = {
+            .type = DOCA_FLOW_FWD_PIPE,
+            .next_pipe = tcp_ack_queues->rxq_pipe_gpu,
+        };
+
+        result = doca_flow_pipe_control_add_entry(0,
+                                              priority_low,
+                                              tcp_ack_queues->root_pipe,
+                                              &tcp_match_gpu,
+                                              &tcp_match_gpu_mask,
+                                              NULL, NULL, NULL, NULL, NULL,
+                                              &tcp_fwd_gpu,
+                                              NULL,
+                                              &tcp_ack_queues->root_tcp_entry_gpu);
+        if (result != DOCA_SUCCESS) {
+            DOCA_LOG_ERR("Root pipe TCP GPU entry creation failed: %s", doca_error_get_descr(result));
+            return result;  // 让框架处理cleanup
         }
-    };
-
-    struct doca_flow_fwd tcp_cpu_fwd = {
-        .type = DOCA_FLOW_FWD_PIPE,
-        .next_pipe = tcp_ack_queues->rxq_pipe_cpu,
-    };
-
-    result = doca_flow_pipe_control_add_entry(0, 1, root_pipe, &tcp_ctrl_match,
-                                            NULL, NULL, NULL, NULL, NULL, NULL,
-                                            &tcp_cpu_fwd, NULL, &ctrl_entry);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to add TCP control entry: %s", doca_error_get_descr(result));
-        goto destroy_root_pipe;  // 需要清理root_pipe和pipe_cfg
     }
 
-    // 6. 创建TCP数据包规则（低优先级）
-    struct doca_flow_match tcp_data_match = {
-        .outer = {
-            .l3_type = DOCA_FLOW_L3_TYPE_IP4,
-            .l4_type_ext = DOCA_FLOW_L4_TYPE_EXT_TCP,
-            .tcp.flags = TCP_FLAG_ACK,
+    // 6. 创建CPU的TCP控制包规则（高优先级）
+    if (tcp_ack_queues->rxq_pipe_cpu) {
+        struct doca_flow_match tcp_match_cpu = {
+            .outer = {
+                .l3_type = DOCA_FLOW_L3_TYPE_IP4,
+                .l4_type_ext = DOCA_FLOW_L4_TYPE_EXT_TCP,
+            }
+        };
+        struct doca_flow_match tcp_match_cpu_mask = {
+            .outer = {
+                .l3_type = DOCA_FLOW_L3_TYPE_IP4,
+                .l4_type_ext = DOCA_FLOW_L4_TYPE_EXT_TCP,
+            }
+        };
+        struct doca_flow_fwd tcp_fwd_cpu = {
+            .type = DOCA_FLOW_FWD_PIPE,
+            .next_pipe = tcp_ack_queues->rxq_pipe_cpu,
+        };
+
+        uint8_t individual_tcp_flags[] = {
+            DOCA_FLOW_MATCH_TCP_FLAG_SYN,
+            DOCA_FLOW_MATCH_TCP_FLAG_RST,
+            DOCA_FLOW_MATCH_TCP_FLAG_FIN,
+        };
+
+        for (int i = 0; i < 3; i++) {
+            tcp_match_cpu.outer.tcp.flags = individual_tcp_flags[i];
+            tcp_match_cpu_mask.outer.tcp.flags = individual_tcp_flags[i];
+            result = doca_flow_pipe_control_add_entry(0,
+                                                  priority_high,
+                                                  tcp_ack_queues->root_pipe,
+                                                  &tcp_match_cpu,
+                                                  &tcp_match_cpu_mask,
+                                                  NULL, NULL, NULL, NULL, NULL,
+                                                  &tcp_fwd_cpu,
+                                                  NULL,
+                                                  &tcp_ack_queues->root_tcp_entry_cpu[i]);
+            if (result != DOCA_SUCCESS) {
+                DOCA_LOG_ERR("Root pipe TCP CPU entry creation failed: %s", doca_error_get_descr(result));
+                return result;  // 让框架处理cleanup
+            }
         }
-    };
-
-    struct doca_flow_fwd tcp_gpu_fwd = {
-        .type = DOCA_FLOW_FWD_PIPE,
-        .next_pipe = tcp_ack_queues->rxq_pipe_gpu,
-    };
-
-    result = doca_flow_pipe_control_add_entry(0, 3, root_pipe, &tcp_data_match,
-                                            NULL, NULL, NULL, NULL, NULL, NULL,
-                                            &tcp_gpu_fwd, NULL, &data_entry);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to add TCP data entry: %s", doca_error_get_descr(result));
-        return result; // 需要清理ctrl_entry及之前的资源
     }
 
-    // 7. 创建默认丢弃规则（最低优先级）
-    struct doca_flow_fwd drop_fwd = {
-        .type = DOCA_FLOW_FWD_DROP,
-    };
-
-    result = doca_flow_pipe_control_add_entry(0, 4, root_pipe, NULL,
-                                            NULL, NULL, NULL, NULL, NULL, NULL,
-                                            &drop_fwd, NULL, &drop_entry);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to add drop entry: %s", doca_error_get_descr(result));
-        return result;  // 需要清理data_entry及之前的资源
-    }
-
-    // 8. 处理所有条目
-    result = doca_flow_entries_process(port, 0, 0, 0);
-	// DOCA_LOG_INFO("already set the root	pipe");
+    // 7. 处理所有entries
+    result = doca_flow_entries_process(port, 0, default_flow_timeout_usec, 0);
     if (result != DOCA_SUCCESS) {
         DOCA_LOG_ERR("Failed to process entries: %s", doca_error_get_descr(result));
-        return result; // 需要清理所有条目
+        return result;
     }
 
-    // 成功，清理pipe_cfg并返回
-    doca_flow_pipe_cfg_destroy(pipe_cfg);
-    DOCA_LOG_INFO("Successfully created TCP BW root pipe");
+    DOCA_LOG_DBG("Successfully created TCP_BW_ROOT_PIPE");
     return DOCA_SUCCESS;
 
-
-destroy_root_pipe:
-    doca_flow_pipe_destroy(root_pipe);
-destroy_pipe_cfg:
-    doca_flow_pipe_cfg_destroy(pipe_cfg);
+cleanup_cfg:
+    if (pipe_cfg != NULL) {
+        doca_flow_pipe_cfg_destroy(pipe_cfg);
+    }
     return result;
 }
 
