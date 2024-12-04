@@ -99,8 +99,9 @@ int tcp_cpu_rss_func_bw(void *lcore_args)
 				DOCA_LOG_INFO("received a RST packet");
 				destroy_tcp_session(queue_id, pkt, tcp_queues->port);
 				continue; // Do not bother to ack
-			} else if (tcp_hdr->fin) {
+			}else if (tcp_hdr->fin) {
 				log_tcp_flag(pkt, "FIN");
+				DOCA_LOG_INFO("received a FIN packet");
 				destroy_tcp_session(queue_id, pkt, tcp_queues->port);
 				printf("destroyed a tcp session\n");
 			} else if (tcp_hdr->syn) {
@@ -122,6 +123,7 @@ int tcp_cpu_rss_func_bw(void *lcore_args)
 
 		while (num_tx_packets > 0) {
 			num_sent = rte_eth_tx_burst(port_id, queue_id, tx_packets, num_tx_packets);
+			DOCA_LOG_INFO("DPDK tx_burst sent %d packets", num_sent);
 			DOCA_LOG_DBG("DPDK tx_burst sent %d packets", num_sent);
 			num_tx_packets -= num_sent;
 		}
@@ -235,6 +237,7 @@ int tcp_cpu_rss_func(void *lcore_args)
 
 		while (num_tx_packets > 0) {
 			num_sent = rte_eth_tx_burst(port_id, queue_id, tx_packets, num_tx_packets);
+			DOCA_LOG_INFO("DPDK tx_burst sent %d packets for ack", num_sent);
 			DOCA_LOG_DBG("DPDK tx_burst sent %d packets", num_sent);
 			num_tx_packets -= num_sent;
 		}
@@ -396,7 +399,7 @@ struct rte_mbuf *create_ack_packet(const struct rte_mbuf *src_packet, struct rte
 	dst_tcp_hdr->src_port = src_tcp_hdr->dst_port;
 	dst_tcp_hdr->dst_port = src_tcp_hdr->src_port;
 	dst_tcp_hdr->recv_ack = RTE_BE32(RTE_BE32(src_tcp_hdr->sent_seq) + 1);
-	dst_tcp_hdr->sent_seq = src_tcp_hdr->syn ? RTE_BE32(1000) : src_tcp_hdr->recv_ack;
+	dst_tcp_hdr->sent_seq = src_tcp_hdr->syn ? RTE_BE32(10500000) : src_tcp_hdr->recv_ack;
 	dst_tcp_hdr->rx_win = RTE_BE16(60000);
 	dst_tcp_hdr->dt_off = 5 + tcp_option_array_len / 4;
 

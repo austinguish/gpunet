@@ -120,6 +120,31 @@ struct rxq_icmp_queues
     struct doca_gpu_eth_txq* eth_txq_gpu[MAX_QUEUES]; /* DOCA Ethernet send queue GPU handler */
 };
 
+struct rxq_udp_bw_queues
+{
+    struct doca_gpu* gpu_dev; /* GPUNetio handler associated to queues*/
+    struct doca_dev* ddev; /* DOCA device handler associated to queues */
+
+    uint16_t numq; /* Number of queues */
+    struct doca_ctx* eth_rxq_ctx[MAX_QUEUES]; /* DOCA Ethernet receive queue context */
+    struct doca_eth_rxq* eth_rxq_cpu[MAX_QUEUES]; /* DOCA Ethernet receive queue CPU handler */
+    struct doca_gpu_eth_rxq* eth_rxq_gpu[MAX_QUEUES]; /* DOCA Ethernet receive queue GPU handler */
+    struct doca_ctx* eth_txq_ctx[MAX_QUEUES];
+    struct doca_eth_txq* eth_txq_cpu[MAX_QUEUES]; /* DOCA Ethernet send queue CPU handler */
+    struct doca_gpu_eth_txq* eth_txq_gpu[MAX_QUEUES]; /* DOCA Ethernet send queue GPU handler */
+    struct doca_mmap* pkt_buff_mmap[MAX_QUEUES]; /* DOCA mmap to receive packet with DOCA Ethernet queue */
+    void* gpu_pkt_addr[MAX_QUEUES]; /* DOCA mmap GPU memory address */
+    int dmabuf_fd[MAX_QUEUES]; /* GPU memory dmabuf file descriptor */
+
+    struct doca_flow_port* port; /* DOCA Flow port */
+    struct doca_flow_pipe* rxq_pipe; /* DOCA Flow receive pipe */
+    struct doca_flow_pipe* root_pipe; /* DOCA Flow root pipe */
+    struct doca_flow_pipe_entry* root_udp_entry; /* DOCA Flow root entry */
+    uint16_t nums; /* Number of semaphores items */
+    struct doca_gpu_semaphore* sem_cpu[MAX_QUEUES]; /* One semaphore per queue, CPU handler*/
+    struct doca_gpu_semaphore_gpu* sem_gpu[MAX_QUEUES]; /* One semaphore per queue, GPU handler*/
+};
+
 /* Tx buffer, used to send HTTP responses */
 struct tx_buf
 {
@@ -260,6 +285,7 @@ struct doca_flow_port* init_doca_flow(uint16_t port_id, uint8_t rxq_num);
  */
 doca_error_t create_udp_pipe(struct rxq_udp_queues* udp_queues, struct doca_flow_port* port);
 
+doca_error_t create_udp_bw_pipe(struct rxq_udp_bw_queues* udp_queues, struct doca_flow_port* port);
 /*
  * Create DOCA Flow pipeline for TCP control packets on CPU.
  *
@@ -319,25 +345,11 @@ doca_error_t create_root_pipe(struct rxq_udp_queues* udp_queues,
                               struct rxq_icmp_queues* icmp_queues,
                               struct doca_flow_port* port);
 
+doca_error_t create_udp_only_root_pipe(struct rxq_udp_bw_queues* udp_queues,
+                              struct doca_flow_port* port);
+
 
 doca_error_t create_tcp_bw_root_pipe(struct tcp_bw_queues *tcp_ack_queues, struct doca_flow_port *port);
-/*
- * Destroy DOCA Flow.
- *
- * @port_df [in]: DOCA flow port handler
- * @icmp_queues [in]: Application ICMP queues
- * @udp_queues [in]: Application UDP queues
- * @tcp_queues [in]: Application TCP queues
- * @http_server [in]: HTTP server enabled or not
- * @http_queues [in]: Application HTTP queues
- * @return: DOCA_SUCCESS on success and DOCA_ERROR otherwise
- */
-doca_error_t destroy_flow_queue(struct doca_flow_port* port_df,
-                                struct rxq_icmp_queues* icmp_queues,
-                                struct rxq_udp_queues* udp_queues,
-                                struct rxq_tcp_queues* tcp_queues,
-                                bool http_server,
-                                struct txq_http_queues* http_queues);
 
 /*
  * Enable TCP data traffic to GPU once TCP connection is established.
@@ -427,7 +439,25 @@ doca_error_t create_udp_queues(struct rxq_udp_queues* udp_queues,
  * @udp_queues [in]: UDP queues handler
  * @return: DOCA_SUCCESS on success and DOCA_ERROR otherwise
  */
+
 doca_error_t destroy_udp_queues(struct rxq_udp_queues* udp_queues);
+
+doca_error_t create_udp_bw_queues(struct rxq_udp_bw_queues* udp_queues,
+                               struct doca_flow_port* df_port,
+                               struct doca_gpu* gpu_dev,
+                               struct doca_dev* ddev,
+                               struct doca_pe* pe,
+                               uint32_t queue_num,
+                               uint32_t sem_num,doca_eth_txq_gpu_event_error_send_packet_cb_t event_error_send_packet_cb);
+
+doca_error_t destroy_udp_bw_queues(struct rxq_udp_bw_queues* udp_queues);
+
+/*
+ * Destroy UDP queues
+ *
+ * @udp_queues [in]: UDP queues handler
+ * @return: DOCA_SUCCESS on success and DOCA_ERROR otherwise
+ */
 
 /*
  * Create ICMP queues
@@ -510,6 +540,8 @@ doca_error_t prepare_tx_buf(struct tx_buf* buf, enum http_page_get page_type);
  */
 void error_send_packet_cb(struct doca_eth_txq_gpu_event_error_send_packet* event_error,
                           union doca_data event_user_data);
+void error_send_udp_packet_cb(struct doca_eth_txq_gpu_event_error_send_packet* event_error,
+                          union doca_data event_user_data);
 
 /*
  * DOCA PE callback to be invoked on ICMP Eth Txq to get the debug info
@@ -554,6 +586,10 @@ doca_error_t kernel_receive_tcp(cudaStream_t stream,
 doca_error_t kernel_receive_udp(cudaStream_t stream, uint32_t* exit_cond, struct rxq_udp_queues* udp_queues);
 
 
+
+    doca_error_t kernel_receive_udp_bw(cudaStream_t stream, uint32_t* exit_cond, struct rxq_udp_bw_queues* udp_queues,float* mat_a);
+
+
 /*
  * Launch a CUDA kernel to specifically receive ICMP packets.
  *
@@ -586,7 +622,27 @@ doca_error_t kernel_tcp_bw_test(
     uint32_t* exit_cond,
     struct tcp_bw_queues* tcp_bw_queues);
 
+    /*
+     * Destroy DOCA Flow.
+     *
+     * @port_df [in]: DOCA flow port handler
+     * @icmp_queues [in]: Application ICMP queues
+     * @udp_queues [in]: Application UDP queues
+     * @tcp_queues [in]: Application TCP queues
+     * @http_server [in]: HTTP server enabled or not
+     * @http_queues [in]: Application HTTP queues
+     * @return: DOCA_SUCCESS on success and DOCA_ERROR otherwise
+     */
+    doca_error_t destroy_flow_queue(struct doca_flow_port* port_df,
+                                    struct rxq_icmp_queues* icmp_queues,
+                                    struct rxq_udp_queues* udp_queues,
+                                    struct rxq_tcp_queues* tcp_queues,
+                                    bool http_server,
+                                    struct txq_http_queues* http_queues);
 
+
+    doca_error_t destroy_flow_udp_only_queue(struct doca_flow_port* port_df,
+                                    struct rxq_udp_bw_queues* udp_queues);
 #if __cplusplus
 }
 #endif

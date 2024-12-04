@@ -148,10 +148,13 @@ __global__ void cuda_kernel_http_server(uint32_t *exit_cond,
 				hdr->l3_hdr.dst_addr = http_global->ip_src_addr;
 				hdr->l4_hdr.src_port = http_global->tcp_dst_port;
 				hdr->l4_hdr.dst_port = http_global->tcp_src_port;
+
 				hdr->l4_hdr.sent_seq = http_global->tcp_recv_ack;
 				uint32_t prev_pkt_sz = BYTE_SWAP16(http_global->ip_total_length) - sizeof(struct ipv4_hdr) - ((http_global->tcp_dt_off >> 4) * sizeof(uint32_t));
 				hdr->l4_hdr.recv_ack = BYTE_SWAP32(BYTE_SWAP32(http_global->tcp_sent_seq) + prev_pkt_sz);
 				hdr->l4_hdr.cksum = 0;
+				printf("the sent seq is %d\n",BYTE_SWAP32(hdr->l4_hdr.sent_seq));
+				printf("the rec ack is %d\n",hdr->l4_hdr.recv_ack);
 
 				ret = doca_gpu_dev_eth_txq_send_enqueue_strong(txq, buf, base_pkt_len + nbytes_page, 0);
 				if (ret != DOCA_SUCCESS) {

@@ -309,7 +309,15 @@ doca_error_t create_tcp_bw_queues(struct tcp_bw_queues* tcp_ack_queues,
         destroy_tcp_bw_queues(tcp_ack_queues);
         return DOCA_ERROR_BAD_STATE;
     }
+    // copy the page content to the gpu
 
+    result = prepare_tx_buf(&tcp_ack_queues->buf_response, HTTP_GET_INDEX);
+    if (result != DOCA_SUCCESS)
+    {
+        DOCA_LOG_ERR("Failed prepare buf_page_index: %s", doca_error_get_descr(result));
+        destroy_tcp_bw_queues(tcp_ack_queues);
+        return DOCA_ERROR_BAD_STATE;
+    }
 
     result = create_tcp_bw_pipe(tcp_ack_queues, df_port);
     if (result != DOCA_SUCCESS)

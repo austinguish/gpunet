@@ -1,3 +1,6 @@
+//
+// Created by yiwei on 24-12-2.
+//
 /*
  * Copyright (c) 2023 NVIDIA CORPORATION AND AFFILIATES.  All rights reserved.
  *
@@ -33,16 +36,95 @@
 #include "common.h"
 #include "packets.h"
 #include "filters.cuh"
-
+#include "matmul/mat_message.h"
 #define UDP_WARP_MODE 0
 
 DOCA_LOG_REGISTER(GPU_SANITY::KernelReceiveUdp);
+__device__ void parse_matrix_packet(const uint8_t* payload, float *mat_a, float *mat_b) {
+    // 首先验证输入指针
+    if (payload == NULL) {
+        if (threadIdx.x == 0) {
+            printf("Error: NULL payload pointer\n");
+        }
+        return;
+    }
 
-__global__ void cuda_kernel_receive_udp(uint32_t *exit_cond,
+    MatrixPacketHeader* matrix_header = (MatrixPacketHeader*)payload;
+
+    // 打印原始header信息
+    if (threadIdx.x == 0) {
+        printf("Header info: matrix_id=%u, chunk_id=%u, chunk_size=%u\n",
+               matrix_header->matrix_id,
+               matrix_header->chunk_id,
+               matrix_header->chunk_size);
+    }
+
+    // 转换字节序
+    uint32_t matrix_id = BYTE_SWAP32(matrix_header->matrix_id);
+    uint32_t chunk_id = BYTE_SWAP32(matrix_header->chunk_id);
+    uint32_t chunk_size = BYTE_SWAP32(matrix_header->chunk_size);
+
+    // 验证 chunk_size
+    if (chunk_size == 0 || chunk_size > MAX_FLOATS_PER_PACKET) {
+        if (threadIdx.x == 0) {
+            printf("Invalid chunk size: %u\n", chunk_size);
+        }
+        return;
+    }
+
+    // 计算实际的数据指针位置
+    float* mat_ptr = (float*)(payload + sizeof(MatrixPacketHeader));
+
+    // 打印指针信息
+    if (threadIdx.x == 0) {
+        printf("Payload address: %p, Matrix data address: %p\n",
+               payload, mat_ptr);
+        printf("First float value at mat_ptr: %f\n", mat_ptr[0]);
+    }
+
+    // 选择目标矩阵
+    float* dest_matrix = (matrix_id == 0) ? mat_a : mat_b;
+    if (dest_matrix == NULL) {
+        if (threadIdx.x == 0) {
+            printf("Error: NULL destination matrix pointer\n");
+        }
+        return;
+    }
+
+    // 计算偏移，并验证
+    size_t offset = chunk_id * chunk_size;
+
+    // 逐个元素安全复制
+    for (uint32_t i = 0; i < chunk_size; i++) {
+        if (threadIdx.x == 0 && i == 0) {
+            printf("Copying first element: source=%f\n", mat_ptr[0]);
+        }
+
+        float val;
+        // 使用更安全的复制方式
+        if (i < chunk_size) {  // 额外的边界检查
+            val = __ldg(&mat_ptr[i]);  // 使用 __ldg 做全局内存加载
+            dest_matrix[offset + i] = val;
+        }
+    }
+
+    // 验证写入
+    if (threadIdx.x == 0) {
+        printf("First value written: %f\n", dest_matrix[offset]);
+    }
+}
+
+
+
+
+
+
+
+__global__ void cuda_kernel_receive_udp_bw(uint32_t *exit_cond,
 					struct doca_gpu_eth_rxq *rxq0, struct doca_gpu_eth_rxq *rxq1, struct doca_gpu_eth_rxq *rxq2, struct doca_gpu_eth_rxq *rxq3,
 					int sem_num,
 					struct doca_gpu_semaphore_gpu *sem0, struct doca_gpu_semaphore_gpu *sem1, struct doca_gpu_semaphore_gpu *sem2, struct doca_gpu_semaphore_gpu *sem3
-				)
+				,float* mat_a)
 {
 	__shared__ uint32_t rx_pkt_num;
 	__shared__ uint64_t rx_buf_idx;
@@ -60,7 +142,7 @@ __global__ void cuda_kernel_receive_udp(uint32_t *exit_cond,
 	uint32_t lane_id = threadIdx.x % WARP_SIZE;
 	uint8_t *payload;
 	uint32_t sem_idx = 0;
-
+    uint32_t worker_number = blockIdx.x*blockDim.x+threadIdx.x;
 	if (blockIdx.x == 0) {
 		rxq = rxq0;
 		sem = sem0;
@@ -123,18 +205,15 @@ __global__ void cuda_kernel_receive_udp(uint32_t *exit_cond,
 			}
 
 			raw_to_udp(buf_addr, &hdr, &payload);
+			parse_matrix_packet(payload,mat_a,NULL);
 			// try to print out the hdr info
-			printf("the src addr is %u,and the src port is %u \n",hdr->l3_hdr.src_addr,hdr->l4_hdr.src_port);
-			printf("the dst addr is %u,and the dst port is %u\n",hdr->l3_hdr.dst_addr,hdr->l4_hdr.dst_port);
-
-			if (filter_is_dns(&(hdr->l4_hdr), payload))
-				stats_thread.dns++;
-			else
-				stats_thread.others++;
-
+			// printf("the src addr is %u,and the src port is %u \n",hdr->l3_hdr.src_addr,hdr->l4_hdr.src_port);
+			// printf("the dst addr is %u,and the dst port is %u\n",hdr->l3_hdr.dst_addr,hdr->l4_hdr.dst_port);
+			stats_thread.others++;
 			/* Double-proof it's not reading old packets */
 			wipe_packet_32b((uint8_t*)&(hdr->l4_hdr));
 			buf_idx += blockDim.x;
+			//mat_a[worker_number] = 123.4f;
 		}
 		__syncthreads();
 
@@ -177,7 +256,7 @@ __global__ void cuda_kernel_receive_udp(uint32_t *exit_cond,
 
 extern "C" {
 
-doca_error_t kernel_receive_udp(cudaStream_t stream, uint32_t *exit_cond, struct rxq_udp_queues *udp_queues)
+doca_error_t kernel_receive_udp_bw(cudaStream_t stream, uint32_t *exit_cond, struct rxq_udp_bw_queues *udp_queues,float* mat_a)
 {
 	cudaError_t result = cudaSuccess;
 
@@ -194,10 +273,10 @@ doca_error_t kernel_receive_udp(cudaStream_t stream, uint32_t *exit_cond, struct
 	}
 
 	/* Assume MAX_QUEUES == 4 */
-	cuda_kernel_receive_udp<<<udp_queues->numq, CUDA_THREADS, 0, stream>>>(exit_cond,
+	cuda_kernel_receive_udp_bw<<<udp_queues->numq, CUDA_THREADS, 0, stream>>>(exit_cond,
 									udp_queues->eth_rxq_gpu[0], udp_queues->eth_rxq_gpu[1], udp_queues->eth_rxq_gpu[2], udp_queues->eth_rxq_gpu[3],
 									udp_queues->nums,
-									udp_queues->sem_gpu[0], udp_queues->sem_gpu[1], udp_queues->sem_gpu[2], udp_queues->sem_gpu[3]
+									udp_queues->sem_gpu[0], udp_queues->sem_gpu[1], udp_queues->sem_gpu[2], udp_queues->sem_gpu[3],mat_a
 									);
 	result = cudaGetLastError();
 	if (cudaSuccess != result) {

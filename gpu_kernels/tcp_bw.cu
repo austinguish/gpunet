@@ -74,6 +74,43 @@ __device__ void tcp_swap_ports(struct eth_ip_tcp_hdr* hdr)
     hdr->l4_hdr.dst_port = tmp;
 }
 
+static
+__device__ void create_ack_packet(struct eth_ip_tcp_hdr* hdr, uint32_t* nbytes) {
+    // 1. MAC layer: swap addresses
+    tcp_swap_mac_addr(hdr);
+
+    // 2. IP layer: swap addresses and set basic fields
+    tcp_swap_ip_addr(hdr);
+    hdr->l3_hdr.version_ihl = (4 << 4) | 5;
+    hdr->l3_hdr.time_to_live = 64;
+    hdr->l3_hdr.type_of_service = 0;
+
+    // 3. TCP layer: handle ports and sequence numbers
+    tcp_swap_ports(hdr);
+    uint32_t tcp_header_len = (hdr->l4_hdr.dt_off >> 4) * 4;
+    uint32_t data_len = BYTE_SWAP16(hdr->l3_hdr.total_length) - sizeof(struct ipv4_hdr) - tcp_header_len;
+
+    // Set sequence and ack numbers
+    uint32_t rcv_seq = BYTE_SWAP32(hdr->l4_hdr.sent_seq);
+    uint32_t rcv_ack = BYTE_SWAP32(hdr->l4_hdr.recv_ack);
+    hdr->l4_hdr.sent_seq = BYTE_SWAP32(rcv_ack);
+    hdr->l4_hdr.recv_ack = BYTE_SWAP32(rcv_seq + data_len);
+    printf("set the ack to %u\n",BYTE_SWAP32(hdr->l4_hdr.recv_ack));
+
+    // 4. Set TCP flags and window
+    hdr->l4_hdr.tcp_flags = TCP_FLAG_ACK;
+    hdr->l4_hdr.rx_win = BYTE_SWAP16(5670);  // Same window size as reference
+    hdr->l4_hdr.tcp_urp = 0;
+
+    // 5. Set packet lengths
+    hdr->l3_hdr.total_length = BYTE_SWAP16(sizeof(struct ipv4_hdr) + tcp_header_len);
+    *nbytes = sizeof(struct ether_hdr) + sizeof(struct ipv4_hdr) + tcp_header_len;
+
+    // 6. Reset checksums for hardware offload
+    hdr->l3_hdr.hdr_checksum = 0;
+    hdr->l4_hdr.cksum = 0;
+}
+
 __global__ void cuda_kernel_tcp_bw(uint32_t* exit_cond, struct doca_gpu_eth_rxq* rxq1, struct doca_gpu_eth_rxq* rxq2,
                                    struct doca_gpu_eth_rxq* rxq3,
                                    struct doca_gpu_eth_rxq* rxq4, struct doca_gpu_eth_txq* txq1,
@@ -158,30 +195,50 @@ __global__ void cuda_kernel_tcp_bw(uint32_t* exit_cond, struct doca_gpu_eth_rxq*
             }
 
             raw_to_tcp(buf_addr, &hdr, &payload);
+            // check the seq number and the ack number
+            // print the payload here
 
+
+            // printf("the flag of the packet is %d\n",hdr->l4_hdr.tcp_flags);
             // Prepare TCP ACK packet
-            tcp_swap_mac_addr(hdr);
-            tcp_swap_ip_addr(hdr);
-            tcp_swap_ports(hdr);
+            // tcp_swap_mac_addr(hdr);
+            // tcp_swap_ip_addr(hdr);
+            // tcp_swap_ports(hdr);
+            //
+            // // 1. TCP header length
+            // uint32_t tcp_header_len = (hdr->l4_hdr.dt_off >> 4) * 4;
+            //
+            // // data length
+            // uint32_t data_len = BYTE_SWAP16(hdr->l3_hdr.total_length) - sizeof(struct ipv4_hdr) - tcp_header_len;
+            // // printf("datalength is %d",data_len);
+            // // set the sequence number and ack number
+            // uint32_t rcv_seq = BYTE_SWAP32(hdr->l4_hdr.sent_seq);
+            // uint32_t rcv_ack = BYTE_SWAP32(hdr->l4_hdr.recv_ack);
+            // hdr->l4_hdr.sent_seq = BYTE_SWAP32(rcv_ack);
+            // hdr->l4_hdr.recv_ack = BYTE_SWAP32(rcv_seq + data_len);
+            // // uint32_t prev_pkt_sz = BYTE_SWAP16(hdr->l3_hdr.total_length) - sizeof(struct ipv4_hdr) - ((hdr->l4_hdr.dt_off >> 4) * sizeof(uint32_t));
+            // // hdr->l4_hdr.recv_ack = BYTE_SWAP32(BYTE_SWAP32(hdr->l4_hdr.sent_seq) + prev_pkt_sz);
+            //
+            // // set tcp flags and window
+            // hdr->l4_hdr.tcp_flags = TCP_FLAG_ACK|TCP_FLAG_PSH;
+            // hdr->l4_hdr.rx_win = BYTE_SWAP16(6000);
+            // hdr->l4_hdr.cksum = 0;
+            // hdr->l4_hdr.tcp_urp = 0;
+            // // set IP header
+            // hdr->l3_hdr.version_ihl = (4 << 4) | 5;
+            // hdr->l3_hdr.time_to_live = 64;
+            // hdr->l3_hdr.total_length = BYTE_SWAP16(sizeof(struct ipv4_hdr) + tcp_header_len);
+            // hdr->l3_hdr.type_of_service=0x0;
+            // hdr->l3_hdr.hdr_checksum = 0;
+            //
+            // nbytes = sizeof(struct ether_hdr) + sizeof(struct ipv4_hdr) + tcp_header_len;
 
-            // Set TCP flags for ACK
-            hdr->l4_hdr.tcp_flags = TCP_FLAG_ACK;
+            printf("Seq: %u, Ack: %u\n",
+                   BYTE_SWAP32(hdr->l4_hdr.sent_seq),
+                   BYTE_SWAP32(hdr->l4_hdr.recv_ack));
 
-            // Update sequence and ack numbers
-            uint32_t data_len = BYTE_SWAP16(hdr->l3_hdr.total_length) - (sizeof(struct ipv4_hdr) + sizeof(struct
-                tcp_hdr));
-            uint32_t old_seq = BYTE_SWAP32(hdr->l4_hdr.sent_seq);
-            hdr->l4_hdr.sent_seq = BYTE_SWAP32(BYTE_SWAP32(hdr->l4_hdr.recv_ack));
-            hdr->l4_hdr.recv_ack = BYTE_SWAP32(old_seq + data_len);
-
-            // Update IP header
-            hdr->l3_hdr.time_to_live = 64;
-            hdr->l3_hdr.total_length = BYTE_SWAP16(sizeof(struct ipv4_hdr) + sizeof(struct tcp_hdr));
-            hdr->l3_hdr.hdr_checksum = 0;
-
-            nbytes = sizeof(struct ether_hdr) + sizeof(struct ipv4_hdr) + sizeof(struct tcp_hdr);
-
-            // Send ACK packet
+            create_ack_packet(hdr,&nbytes);
+            //Send ACK packet
             doca_gpu_dev_eth_txq_send_enqueue_strong(txq, buf_ptr, nbytes, DOCA_GPU_SEND_FLAG_NOTIFY);
 
             buf_idx += WARP_SIZE;

@@ -75,6 +75,7 @@ file(WRITE ${CMAKE_SOURCE_DIR}/dpdk_include_path.h
 # Include directories
 include_directories(
         ${CMAKE_SOURCE_DIR}
+        ${CMAKE_SOURCE_DIR}/matmul
         ${CMAKE_SOURCE_DIR}/common
         ${CMAKE_SOURCE_DIR}/config_queues
         /opt/mellanox/doca/include
@@ -104,6 +105,7 @@ set(C_SOURCES
         ${CMAKE_SOURCE_DIR}/config_queues/device.c
         ${CMAKE_SOURCE_DIR}/config_queues/args.c
         ${CMAKE_SOURCE_DIR}/config_queues/flow.c
+        ${CMAKE_SOURCE_DIR}/config_queues/udp.c
         ${CMAKE_SOURCE_DIR}/config_queues/http_txbuf.c
         ${CMAKE_SOURCE_DIR}/config_queues/udp_queues.c
         ${CMAKE_SOURCE_DIR}/config_queues/tcp_queues.c
@@ -115,9 +117,26 @@ set(C_SOURCES
         ${CMAKE_SOURCE_DIR}/gpu_packet_processing.c
 )
 
+set(mm_SOURCES
+        ${CMAKE_SOURCE_DIR}/config_queues/device.c
+        ${CMAKE_SOURCE_DIR}/config_queues/args.c
+        ${CMAKE_SOURCE_DIR}/config_queues/udp.c
+        ${CMAKE_SOURCE_DIR}/config_queues/flow.c
+        ${CMAKE_SOURCE_DIR}/config_queues/http_txbuf.c
+        ${CMAKE_SOURCE_DIR}/config_queues/tcp_queues.c
+        ${CMAKE_SOURCE_DIR}/config_queues/udp_queues.c
+        ${CMAKE_SOURCE_DIR}/config_queues/icmp_queues.c
+        ${CMAKE_SOURCE_DIR}/dpdk_tcp/tcp_cpu_rss_func.c
+        ${CMAKE_SOURCE_DIR}/dpdk_tcp/tcp_session_table.c
+        ${CMAKE_SOURCE_DIR}/common/utils.c
+        ${CMAKE_SOURCE_DIR}/samples/common.c
+        ${CMAKE_SOURCE_DIR}/matrix_mult.c
+)
+
 set(BW_SOURCES
         ${CMAKE_SOURCE_DIR}/config_queues/device.c
         ${CMAKE_SOURCE_DIR}/config_queues/args.c
+        ${CMAKE_SOURCE_DIR}/config_queues/udp.c
         ${CMAKE_SOURCE_DIR}/config_queues/flow.c
         ${CMAKE_SOURCE_DIR}/config_queues/http_txbuf.c
         ${CMAKE_SOURCE_DIR}/config_queues/udp_queues.c
@@ -137,6 +156,7 @@ set(CUDA_SOURCES
         ${CMAKE_SOURCE_DIR}/gpu_kernels/receive_icmp.cu
         ${CMAKE_SOURCE_DIR}/gpu_kernels/http_server.cu
         ${CMAKE_SOURCE_DIR}/gpu_kernels/tcp_bw.cu
+        ${CMAKE_SOURCE_DIR}/gpu_kernels/udp.cu
         #        ${CMAKE_SOURCE_DIR}/bw/measure_udp_bw.cu
 )
 
@@ -224,8 +244,49 @@ foreach(lib ${DPDK_LIBS})
 endforeach()
 
 
-# Set installation rules
+#Set installation rules
 
+add_executable(matrix_mult ${mm_SOURCES})
+
+# Link libraries
+target_link_libraries(matrix_mult
+        gpu_kernels
+        ${DOCA_ARGP_LIB}
+        ${DOCA_GPUNETIO_LIB}
+        ${DOCA_GPUNETIO_DEVICE_LIB}
+        ${DOCA_ETH_LIB}
+        ${DOCA_DPDK_BRIDGE_LIB}
+        ${DOCA_FLOW_LIB}
+        ${DOCA_FLOW_CT_LIB}
+        ${DOCA_FLOW_TUNE_LIB}
+        ${DOCA_COMMON_LIB}
+        resolv
+        cudart
+        cuda
+        pthread
+        bsd
+)
+
+#Set DPDK libraries
+set(DPDK_LIBS
+        rte_node rte_graph rte_flow_perf rte_pipeline rte_table
+        rte_pdump rte_port rte_fib rte_ipsec rte_vhost rte_stack
+        rte_security rte_sched rte_reorder rte_rib rte_dmadev
+        rte_regexdev rte_rawdev rte_power rte_pcapng rte_member
+        rte_lpm rte_latencystats rte_jobstats rte_gso rte_gro
+        rte_gpudev rte_eventdev rte_efd rte_distributor rte_cryptodev
+        rte_compressdev rte_cfgfile rte_bpf rte_bitratestats rte_bbdev
+        rte_acl rte_timer rte_metrics rte_cmdline rte_pci rte_ethdev
+        rte_ip_frag rte_hash rte_meter rte_net rte_mbuf rte_mempool
+        rte_rcu rte_ring rte_eal rte_telemetry rte_kvargs
+)
+
+# Link DPDK libraries
+foreach(lib ${DPDK_LIBS})
+    target_link_libraries(matrix_mult
+            /opt/mellanox/dpdk/lib/x86_64-linux-gnu/lib${lib}.so
+    )
+endforeach()
 
 
 
