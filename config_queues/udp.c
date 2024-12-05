@@ -85,6 +85,7 @@ doca_error_t create_udp_bw_queues(struct rxq_udp_bw_queues* udp_queues,
                                                        MAX_PKT_NUM,
                                                        0,
                                                        &cyclic_buffer_size);
+        DOCA_LOG_INFO("the cyclic buffer size is %d",cyclic_buffer_size);
         if (result != DOCA_SUCCESS)
         {
             DOCA_LOG_ERR("Failed to get eth_rxq cyclic buffer size: %s", doca_error_get_descr(result));

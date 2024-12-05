@@ -41,77 +41,26 @@
 
 DOCA_LOG_REGISTER(GPU_SANITY::KernelReceiveUdp);
 __device__ void parse_matrix_packet(const uint8_t* payload, float *mat_a, float *mat_b) {
-    // 首先验证输入指针
-    if (payload == NULL) {
-        if (threadIdx.x == 0) {
-            printf("Error: NULL payload pointer\n");
-        }
-        return;
-    }
+	MatrixPacketHeader header;
+	memcpy(&header, payload, sizeof(MatrixPacketHeader));
 
-    MatrixPacketHeader* matrix_header = (MatrixPacketHeader*)payload;
+	// 打印调试信息
+	printf("Matrix ID: %u\n", header.matrix_id);
+	printf("Chunk ID: %u\n", header.chunk_id);
+	printf("Total Chunks: %u\n", header.total_chunks);
+	printf("Chunk Size: %u\n", header.chunk_size);
+	const float* data = reinterpret_cast<const float*>(payload + sizeof(MatrixPacketHeader));
+	float* target_matrix = (header.matrix_id == 0) ? mat_a : mat_b;
+	size_t offset = header.chunk_id * header.chunk_size;
 
-    // 打印原始header信息
-    if (threadIdx.x == 0) {
-        printf("Header info: matrix_id=%u, chunk_id=%u, chunk_size=%u\n",
-               matrix_header->matrix_id,
-               matrix_header->chunk_id,
-               matrix_header->chunk_size);
-    }
+	// copy the data to the target matrix
+	memcpy(target_matrix + offset, data, header.chunk_size * sizeof(float));
 
-    // 转换字节序
-    uint32_t matrix_id = BYTE_SWAP32(matrix_header->matrix_id);
-    uint32_t chunk_id = BYTE_SWAP32(matrix_header->chunk_id);
-    uint32_t chunk_size = BYTE_SWAP32(matrix_header->chunk_size);
+	// 打印前几个值用于调试
+	for (int i = 0; i < min(5, (int)header.chunk_size); i++) {
+		printf("data[%d] = %f\n", i, target_matrix[offset + i]);
+	}
 
-    // 验证 chunk_size
-    if (chunk_size == 0 || chunk_size > MAX_FLOATS_PER_PACKET) {
-        if (threadIdx.x == 0) {
-            printf("Invalid chunk size: %u\n", chunk_size);
-        }
-        return;
-    }
-
-    // 计算实际的数据指针位置
-    float* mat_ptr = (float*)(payload + sizeof(MatrixPacketHeader));
-
-    // 打印指针信息
-    if (threadIdx.x == 0) {
-        printf("Payload address: %p, Matrix data address: %p\n",
-               payload, mat_ptr);
-        printf("First float value at mat_ptr: %f\n", mat_ptr[0]);
-    }
-
-    // 选择目标矩阵
-    float* dest_matrix = (matrix_id == 0) ? mat_a : mat_b;
-    if (dest_matrix == NULL) {
-        if (threadIdx.x == 0) {
-            printf("Error: NULL destination matrix pointer\n");
-        }
-        return;
-    }
-
-    // 计算偏移，并验证
-    size_t offset = chunk_id * chunk_size;
-
-    // 逐个元素安全复制
-    for (uint32_t i = 0; i < chunk_size; i++) {
-        if (threadIdx.x == 0 && i == 0) {
-            printf("Copying first element: source=%f\n", mat_ptr[0]);
-        }
-
-        float val;
-        // 使用更安全的复制方式
-        if (i < chunk_size) {  // 额外的边界检查
-            val = __ldg(&mat_ptr[i]);  // 使用 __ldg 做全局内存加载
-            dest_matrix[offset + i] = val;
-        }
-    }
-
-    // 验证写入
-    if (threadIdx.x == 0) {
-        printf("First value written: %f\n", dest_matrix[offset]);
-    }
 }
 
 
@@ -205,6 +154,9 @@ __global__ void cuda_kernel_receive_udp_bw(uint32_t *exit_cond,
 			}
 
 			raw_to_udp(buf_addr, &hdr, &payload);
+
+			// print out the matrix chunk id
+
 			parse_matrix_packet(payload,mat_a,NULL);
 			// try to print out the hdr info
 			// printf("the src addr is %u,and the src port is %u \n",hdr->l3_hdr.src_addr,hdr->l4_hdr.src_port);

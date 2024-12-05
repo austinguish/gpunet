@@ -320,7 +320,7 @@ int main(int argc, char **argv)
 	}
 	cpu_exit_condition[0] = 0;
 	float *A;
-	size_t size = CUDA_THREADS*app_cfg.queue_num*sizeof(float);
+	size_t size = 2048*2048*sizeof(float);
 	cudaError_t err = cudaMalloc((void **)&A,size);
 	if (err != cudaSuccess) {
 		printf("allocate cuda mem failed: %s\n", cudaGetErrorString(err));
@@ -374,7 +374,7 @@ int main(int argc, char **argv)
 	float *A_CPU = (float *)malloc(size);
 	memset(A_CPU, 0, size);
 	cudaMemcpy(A_CPU, A, size, cudaMemcpyDeviceToHost);
-	for (int i = 0; i<CUDA_THREADS*app_cfg.queue_num;i++)
+	for (int i = 0; i<5;i++)
 	{
 		printf("A[%d]=%f\n",i,A_CPU[i]);
 	}

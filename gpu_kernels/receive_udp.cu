@@ -123,10 +123,7 @@ __global__ void cuda_kernel_receive_udp(uint32_t *exit_cond,
 			}
 
 			raw_to_udp(buf_addr, &hdr, &payload);
-			// try to print out the hdr info
-			printf("the src addr is %u,and the src port is %u \n",hdr->l3_hdr.src_addr,hdr->l4_hdr.src_port);
-			printf("the dst addr is %u,and the dst port is %u\n",hdr->l3_hdr.dst_addr,hdr->l4_hdr.dst_port);
-
+			// try to print out the hdr inf
 			if (filter_is_dns(&(hdr->l4_hdr), payload))
 				stats_thread.dns++;
 			else

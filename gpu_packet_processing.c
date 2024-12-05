@@ -436,7 +436,7 @@ int main(int argc, char **argv)
 	}
 
 	result = doca_gpu_mem_alloc(gpu_dev,
-				    sizeof(uint32_t),
+				    sizeof(uint32_t)*1024,
 				    4096,
 				    DOCA_GPU_MEM_TYPE_GPU_CPU,
 				    (void **)&gpu_exit_condition,
@@ -454,14 +454,14 @@ int main(int argc, char **argv)
 	DOCA_GPUNETIO_VOLATILE(*cpu_exit_condition) = 1;
 	 kernel_receive_udp(rx_udp_stream, gpu_exit_condition, &udp_queues);
 	//kernel_receive_udp_bw(rx_udp_stream, gpu_exit_condition, &udp_queues);
-	kernel_receive_tcp(rx_tcp_stream, gpu_exit_condition, &tcp_queues, app_cfg.http_server);
-	kernel_receive_icmp(rx_icmp_stream, gpu_exit_condition, &icmp_queues);
-	if (app_cfg.http_server)
-		kernel_http_server(tx_http_server, gpu_exit_condition, &tcp_queues, &http_queues);
+	// kernel_receive_tcp(rx_tcp_stream, gpu_exit_condition, &tcp_queues, app_cfg.http_server);
+	// kernel_receive_icmp(rx_icmp_stream, gpu_exit_condition, &icmp_queues);
+	// if (app_cfg.http_server)
+	// 	kernel_http_server(tx_http_server, gpu_exit_condition, &tcp_queues, &http_queues);
 
 	cudaStreamSynchronize(rx_udp_stream);
-	cudaStreamSynchronize(rx_tcp_stream);
-	cudaStreamSynchronize(rx_icmp_stream);
+	// cudaStreamSynchronize(rx_tcp_stream);
+	// cudaStreamSynchronize(rx_icmp_stream);
 	if (app_cfg.http_server)
 		cudaStreamSynchronize(tx_http_server);
 	DOCA_GPUNETIO_VOLATILE(*cpu_exit_condition) = 0;
@@ -470,8 +470,8 @@ int main(int argc, char **argv)
 
 	kernel_receive_udp(rx_udp_stream, gpu_exit_condition, &udp_queues);
 	//kernel_receive_udp_bw(rx_udp_stream, gpu_exit_condition, &udp_queues);
-	kernel_receive_tcp(rx_tcp_stream, gpu_exit_condition, &tcp_queues, app_cfg.http_server);
-	kernel_receive_icmp(rx_icmp_stream, gpu_exit_condition, &icmp_queues);
+	// kernel_receive_tcp(rx_tcp_stream, gpu_exit_condition, &tcp_queues, app_cfg.http_server);
+	// kernel_receive_icmp(rx_icmp_stream, gpu_exit_condition, &icmp_queues);
 	if (app_cfg.http_server)
 		kernel_http_server(tx_http_server, gpu_exit_condition, &tcp_queues, &http_queues);
 
@@ -516,10 +516,10 @@ int main(int argc, char **argv)
 	DOCA_GPUNETIO_VOLATILE(*cpu_exit_condition) = 1;
 	cudaStreamSynchronize(rx_udp_stream);
 	cudaStreamDestroy(rx_udp_stream);
-	cudaStreamSynchronize(rx_tcp_stream);
-	cudaStreamDestroy(rx_tcp_stream);
-	cudaStreamSynchronize(rx_icmp_stream);
-	cudaStreamDestroy(rx_icmp_stream);
+	// cudaStreamSynchronize(rx_tcp_stream);
+	// cudaStreamDestroy(rx_tcp_stream);
+	// cudaStreamSynchronize(rx_icmp_stream);
+	// cudaStreamDestroy(rx_icmp_stream);
 	if (app_cfg.http_server) {
 		cudaStreamSynchronize(tx_http_server);
 		cudaStreamDestroy(tx_http_server);
