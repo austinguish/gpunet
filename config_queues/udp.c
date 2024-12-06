@@ -28,6 +28,7 @@
 #include <rte_ethdev.h>
 
 #include "common.h"
+#include "matmul/mat_message.h"
 
 DOCA_LOG_REGISTER(GPU_PACKET_PROCESSING_UDP_BW);
 
@@ -328,7 +329,7 @@ doca_error_t create_udp_bw_queues(struct rxq_udp_bw_queues* udp_queues,
          * The GPU access each item only once to update values.
          */
         result = doca_gpu_semaphore_set_custom_info(udp_queues->sem_cpu[idx],
-                                                    sizeof(struct stats_udp),
+                                                    sizeof(struct MatrixCompletionInfo),
                                                     DOCA_GPU_MEM_TYPE_CPU_GPU);
         if (result != DOCA_SUCCESS)
         {

@@ -101,55 +101,39 @@ find_library(DOCA_FLOW_TUNE_LIB doca_flow_tune_server PATHS /opt/mellanox/doca/l
 find_library(DOCA_COMMON_LIB doca_common PATHS /opt/mellanox/doca/lib/x86_64-linux-gnu REQUIRED)
 
 # 移除重复的源文件
-set(C_SOURCES
+set(COMMON_SOURCES
         ${CMAKE_SOURCE_DIR}/config_queues/device.c
         ${CMAKE_SOURCE_DIR}/config_queues/args.c
-        ${CMAKE_SOURCE_DIR}/config_queues/flow.c
         ${CMAKE_SOURCE_DIR}/config_queues/udp.c
+        ${CMAKE_SOURCE_DIR}/config_queues/flow.c
         ${CMAKE_SOURCE_DIR}/config_queues/http_txbuf.c
-        ${CMAKE_SOURCE_DIR}/config_queues/udp_queues.c
         ${CMAKE_SOURCE_DIR}/config_queues/tcp_queues.c
+        ${CMAKE_SOURCE_DIR}/config_queues/udp_queues.c
         ${CMAKE_SOURCE_DIR}/config_queues/icmp_queues.c
         ${CMAKE_SOURCE_DIR}/dpdk_tcp/tcp_cpu_rss_func.c
         ${CMAKE_SOURCE_DIR}/dpdk_tcp/tcp_session_table.c
         ${CMAKE_SOURCE_DIR}/common/utils.c
         ${CMAKE_SOURCE_DIR}/samples/common.c
+)
+
+# Define specific sources for each target by combining common sources with target-specific files
+set(C_SOURCES
+        ${COMMON_SOURCES}
         ${CMAKE_SOURCE_DIR}/gpu_packet_processing.c
 )
 
 set(mm_SOURCES
-        ${CMAKE_SOURCE_DIR}/config_queues/device.c
-        ${CMAKE_SOURCE_DIR}/config_queues/args.c
-        ${CMAKE_SOURCE_DIR}/config_queues/udp.c
-        ${CMAKE_SOURCE_DIR}/config_queues/flow.c
-        ${CMAKE_SOURCE_DIR}/config_queues/http_txbuf.c
-        ${CMAKE_SOURCE_DIR}/config_queues/tcp_queues.c
-        ${CMAKE_SOURCE_DIR}/config_queues/udp_queues.c
-        ${CMAKE_SOURCE_DIR}/config_queues/icmp_queues.c
-        ${CMAKE_SOURCE_DIR}/dpdk_tcp/tcp_cpu_rss_func.c
-        ${CMAKE_SOURCE_DIR}/dpdk_tcp/tcp_session_table.c
-        ${CMAKE_SOURCE_DIR}/common/utils.c
-        ${CMAKE_SOURCE_DIR}/samples/common.c
+        ${COMMON_SOURCES}
         ${CMAKE_SOURCE_DIR}/matrix_mult.c
 )
 
 set(BW_SOURCES
-        ${CMAKE_SOURCE_DIR}/config_queues/device.c
-        ${CMAKE_SOURCE_DIR}/config_queues/args.c
-        ${CMAKE_SOURCE_DIR}/config_queues/udp.c
-        ${CMAKE_SOURCE_DIR}/config_queues/flow.c
-        ${CMAKE_SOURCE_DIR}/config_queues/http_txbuf.c
-        ${CMAKE_SOURCE_DIR}/config_queues/udp_queues.c
-        ${CMAKE_SOURCE_DIR}/config_queues/tcp_queues.c
-        ${CMAKE_SOURCE_DIR}/config_queues/icmp_queues.c
+        ${COMMON_SOURCES}
         ${CMAKE_SOURCE_DIR}/config_queues/tcp_bw_queues.c
-        ${CMAKE_SOURCE_DIR}/dpdk_tcp/tcp_cpu_rss_func.c
-        ${CMAKE_SOURCE_DIR}/dpdk_tcp/tcp_session_table.c
-        ${CMAKE_SOURCE_DIR}/common/utils.c
-        ${CMAKE_SOURCE_DIR}/samples/common.c
         ${CMAKE_SOURCE_DIR}/gpu_bw.c
 )
 
+# CUDA sources remain unchanged as they don't have overlap
 set(CUDA_SOURCES
         ${CMAKE_SOURCE_DIR}/gpu_kernels/receive_tcp.cu
         ${CMAKE_SOURCE_DIR}/gpu_kernels/receive_udp.cu
@@ -157,9 +141,7 @@ set(CUDA_SOURCES
         ${CMAKE_SOURCE_DIR}/gpu_kernels/http_server.cu
         ${CMAKE_SOURCE_DIR}/gpu_kernels/tcp_bw.cu
         ${CMAKE_SOURCE_DIR}/gpu_kernels/udp.cu
-        #        ${CMAKE_SOURCE_DIR}/bw/measure_udp_bw.cu
 )
-
 # Create CUDA library for device code
 add_library(gpu_kernels STATIC ${CUDA_SOURCES})
 set_target_properties(gpu_kernels PROPERTIES
@@ -218,7 +200,7 @@ endforeach()
 
 
 add_executable(gpu_bw ${BW_SOURCES})
-target_link_libraries( gpu_bw
+target_link_libraries(gpu_bw
         gpu_kernels
         ${DOCA_ARGP_LIB}
         ${DOCA_GPUNETIO_LIB}
@@ -267,19 +249,6 @@ target_link_libraries(matrix_mult
         bsd
 )
 
-#Set DPDK libraries
-set(DPDK_LIBS
-        rte_node rte_graph rte_flow_perf rte_pipeline rte_table
-        rte_pdump rte_port rte_fib rte_ipsec rte_vhost rte_stack
-        rte_security rte_sched rte_reorder rte_rib rte_dmadev
-        rte_regexdev rte_rawdev rte_power rte_pcapng rte_member
-        rte_lpm rte_latencystats rte_jobstats rte_gso rte_gro
-        rte_gpudev rte_eventdev rte_efd rte_distributor rte_cryptodev
-        rte_compressdev rte_cfgfile rte_bpf rte_bitratestats rte_bbdev
-        rte_acl rte_timer rte_metrics rte_cmdline rte_pci rte_ethdev
-        rte_ip_frag rte_hash rte_meter rte_net rte_mbuf rte_mempool
-        rte_rcu rte_ring rte_eal rte_telemetry rte_kvargs
-)
 
 # Link DPDK libraries
 foreach(lib ${DPDK_LIBS})

@@ -33,6 +33,7 @@
 #include "common.h"
 #include "dpdk_tcp/tcp_session_table.h"
 #include "dpdk_tcp/tcp_cpu_rss_func.h"
+#include "matmul/mat_message.h"
 
 #define SLEEP_IN_NANOS (10 * 1000) /* Sample the PE every 10 microseconds  */
 
@@ -103,12 +104,12 @@ static void stats_core(void *args)
 
 	doca_error_t result = DOCA_SUCCESS;
 	enum doca_gpu_semaphore_status status;
-	struct stats_udp udp_st[MAX_QUEUES] = {0};
+	struct MatrixCompletionInfo udp_st[MAX_QUEUES] = {0};
 	uint32_t sem_idx_udp[MAX_QUEUES] = {0};
 	uint64_t start_time_sec = 0;
 	uint64_t interval_print = 0;
 	uint64_t interval_sec = 0;
-	struct stats_udp *custom_udp_st;
+	struct MatrixCompletionInfo *completion_info;
 
 	DOCA_LOG_INFO("Core %u is reporting filter stats", rte_lcore_id());
 	get_ns(&start_time_sec);
@@ -124,18 +125,26 @@ static void stats_core(void *args)
 			}
 
 			if (status == DOCA_GPU_SEMAPHORE_STATUS_READY) {
+				// printf("all the packets are received\n");
 				result = doca_gpu_semaphore_get_custom_info_addr(udp_queues.sem_cpu[idxq],
 										 sem_idx_udp[idxq],
-										 (void **)&(custom_udp_st));
+										 (void **)&(completion_info));
 				if (result != DOCA_SUCCESS) {
 					DOCA_LOG_ERR("UDP semaphore get address error");
 					DOCA_GPUNETIO_VOLATILE(force_quit) = true;
 					return;
 				}
 
-				udp_st[idxq].dns += custom_udp_st->dns;
-				udp_st[idxq].others += custom_udp_st->others;
-				udp_st[idxq].total += custom_udp_st->total;
+				udp_st[idxq].received_chunks_a += completion_info->received_chunks_a;
+				udp_st[idxq].received_chunks_b += completion_info->received_chunks_b;
+				udp_st[idxq].total_chunks_a = completion_info->total_chunks_a;
+				udp_st[idxq].total_chunks_b = completion_info->total_chunks_b;
+				// todo maybe in different block
+				udp_st[idxq].received_chunk_num += completion_info->received_chunk_num;
+                if (udp_st[idxq].received_chunk_num == 2*udp_st[idxq].total_chunks_a)
+                {
+	                printf("received all the chunks great\n");
+                }
 
 				result = doca_gpu_semaphore_set_status(udp_queues.sem_cpu[idxq],
 								       sem_idx_udp[idxq],
@@ -156,11 +165,11 @@ static void stats_core(void *args)
 			printf("\nSeconds %ld\n", interval_sec - start_time_sec);
 
 			for (int idxq = 0; idxq < udp_queues.numq; idxq++) {
-				printf("[UDP] QUEUE: %d DNS: %ld OTHER: %ld TOTAL: %ld\n",
+				printf("[UDP] QUEUE: %d A: %u B: %u TOTAL A: %u TOTAL B: %u\n",
 				       idxq,
-				       udp_st[idxq].dns,
-				       udp_st[idxq].others,
-				       udp_st[idxq].total);
+				       udp_st[idxq].received_chunks_a,
+				       udp_st[idxq].received_chunks_b,
+				       udp_st[idxq].total_chunks_a,udp_st[idxq].total_chunks_b);
 			}
 
 			interval_print = get_ns(&interval_sec);
@@ -320,28 +329,37 @@ int main(int argc, char **argv)
 	}
 	cpu_exit_condition[0] = 0;
 	float *A;
-	size_t size = 2048*2048*sizeof(float);
+	size_t size = MAX_MATRIX_DIMENSION*MAX_MATRIX_DIMENSION*sizeof(float);
 	cudaError_t err = cudaMalloc((void **)&A,size);
 	if (err != cudaSuccess) {
 		printf("allocate cuda mem failed: %s\n", cudaGetErrorString(err));
 		return -1;
 	}
-
+	float *B;
+	err = cudaMalloc((void **)&B,size);
+	if (err != cudaSuccess) {
+		printf("allocate cuda mem for mat C failed: %s\n", cudaGetErrorString(err));
+		return -1;
+	}
+	float *C;
+	err = cudaMalloc((void **)&C,size);
+	if (err != cudaSuccess) {
+		printf("allocate cuda mem for mat C failed: %s\n", cudaGetErrorString(err));
+		return -1;
+	}
 	/*
 	 * Some GPUs may require an initial warmup without doing any real operation.
 	 */
 	DOCA_LOG_INFO("Warm up CUDA kernels");
 	DOCA_GPUNETIO_VOLATILE(*cpu_exit_condition) = 1;
-	 kernel_receive_udp_bw(rx_udp_stream, gpu_exit_condition, &udp_queues,A);
+	 kernel_receive_udp_bw(rx_udp_stream, gpu_exit_condition, &udp_queues,A,B);
 	//kernel_receive_udp_bw(rx_udp_stream, gpu_exit_condition, &udp_queues);
 	cudaStreamSynchronize(rx_udp_stream);
 	DOCA_GPUNETIO_VOLATILE(*cpu_exit_condition) = 0;
 
 	DOCA_LOG_INFO("Launching CUDA kernels");
 
-	kernel_receive_udp_bw(rx_udp_stream, gpu_exit_condition, &udp_queues,A);
-	//kernel_receive_udp_bw(rx_udp_stream, gpu_exit_condition, &udp_queues);
-
+	kernel_receive_udp_bw(rx_udp_stream, gpu_exit_condition, &udp_queues,A,B);
 	/* Launch stats proxy thread to report pipeline status */
 	current_lcore = rte_get_next_lcore(current_lcore, true, false);
 	if (rte_eal_remote_launch((void *)stats_core, NULL, current_lcore) != 0) {
@@ -371,6 +389,7 @@ int main(int argc, char **argv)
     // cudamemalloc an area to store the matrix A
 
 	// copy the A from GPU to CPU to see if we got the right result
+
 	float *A_CPU = (float *)malloc(size);
 	memset(A_CPU, 0, size);
 	cudaMemcpy(A_CPU, A, size, cudaMemcpyDeviceToHost);

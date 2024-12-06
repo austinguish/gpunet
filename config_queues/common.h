@@ -587,7 +587,7 @@ doca_error_t kernel_receive_udp(cudaStream_t stream, uint32_t* exit_cond, struct
 
 
 
-    doca_error_t kernel_receive_udp_bw(cudaStream_t stream, uint32_t* exit_cond, struct rxq_udp_bw_queues* udp_queues,float* mat_a);
+    doca_error_t kernel_receive_udp_bw(cudaStream_t stream, uint32_t* exit_cond, struct rxq_udp_bw_queues* udp_queues,float* mat_a,float* mat_b);
 
 
 /*

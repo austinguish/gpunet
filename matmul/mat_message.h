@@ -6,14 +6,26 @@
 
 #include <stdint.h>
 #include <stddef.h>
+struct MatrixCompletionInfo
+{
+    uint32_t total_chunks_a;       // A chunks
+    uint32_t total_chunks_b;       // B chunks
+    uint32_t received_chunks_a;    // received chunks size
+    uint32_t received_chunks_b;    //received chunks size
+    uint32_t received_chunk_num;
+};
 
-// 添加对齐要求
+// set for matrix receive completion
+#define MATRIX_A_COMPLETE 0x1
+#define MATRIX_B_COMPLETE 0x2
+#define ALL_MATRICES_COMPLETE (MATRIX_A_COMPLETE | MATRIX_B_COMPLETE)
+// add the requirement for alignment
 #define MEMORY_ALIGNMENT 16
 
-#pragma pack(push, MEMORY_ALIGNMENT)  // 使用16字节对齐而不是1字节
+#pragma pack(push, MEMORY_ALIGNMENT)
 
-// 添加更多的安全检查和限制
-#define MAX_MATRIX_DIMENSION 1024  // 最大矩阵维度
+
+#define MAX_MATRIX_DIMENSION 16384
 #define MAX_MATRIX_ELEMENTS (MAX_MATRIX_DIMENSION * MAX_MATRIX_DIMENSION)
 
 struct __align__(4) MatrixPacketHeader
@@ -27,7 +39,7 @@ struct __align__(4) MatrixPacketHeader
 
 struct __align__(4) MatrixMessage {
     struct MatrixPacketHeader header;
-    float payload[];  // 确保payload对齐
+    float payload[];
 };
 
 #pragma pack(pop)

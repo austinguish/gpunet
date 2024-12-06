@@ -40,26 +40,26 @@
 #define UDP_WARP_MODE 0
 
 DOCA_LOG_REGISTER(GPU_SANITY::KernelReceiveUdp);
-__device__ void parse_matrix_packet(const uint8_t* payload, float *mat_a, float *mat_b) {
+__device__ void parse_matrix_packet(const uint8_t* payload, float *mat_a, float *mat_b,MatrixCompletionInfo *stat_thread) {
 	MatrixPacketHeader header;
+	stat_thread->received_chunk_num++;
 	memcpy(&header, payload, sizeof(MatrixPacketHeader));
-
-	// 打印调试信息
-	printf("Matrix ID: %u\n", header.matrix_id);
-	printf("Chunk ID: %u\n", header.chunk_id);
-	printf("Total Chunks: %u\n", header.total_chunks);
-	printf("Chunk Size: %u\n", header.chunk_size);
+	stat_thread->total_chunks_a = header.total_chunks;
+	if (header.matrix_id == 0)
+		stat_thread->received_chunks_a+=header.chunk_size;
+	else if (header.matrix_id == 1)
+		stat_thread->received_chunks_b+=header.chunk_size;
 	const float* data = reinterpret_cast<const float*>(payload + sizeof(MatrixPacketHeader));
 	float* target_matrix = (header.matrix_id == 0) ? mat_a : mat_b;
 	size_t offset = header.chunk_id * header.chunk_size;
 
 	// copy the data to the target matrix
 	memcpy(target_matrix + offset, data, header.chunk_size * sizeof(float));
-
-	// 打印前几个值用于调试
-	for (int i = 0; i < min(5, (int)header.chunk_size); i++) {
-		printf("data[%d] = %f\n", i, target_matrix[offset + i]);
-	}
+	//
+	// // 打印前几个值用于调试
+	// for (int i = 0; i < min(5, (int)header.chunk_size); i++) {
+	// 	printf("data[%d] = %f\n", i, target_matrix[offset + i]);
+	// }
 
 }
 
@@ -73,25 +73,25 @@ __global__ void cuda_kernel_receive_udp_bw(uint32_t *exit_cond,
 					struct doca_gpu_eth_rxq *rxq0, struct doca_gpu_eth_rxq *rxq1, struct doca_gpu_eth_rxq *rxq2, struct doca_gpu_eth_rxq *rxq3,
 					int sem_num,
 					struct doca_gpu_semaphore_gpu *sem0, struct doca_gpu_semaphore_gpu *sem1, struct doca_gpu_semaphore_gpu *sem2, struct doca_gpu_semaphore_gpu *sem3
-				,float* mat_a)
+				,float* mat_a,float* mat_b)
 {
 	__shared__ uint32_t rx_pkt_num;
 	__shared__ uint64_t rx_buf_idx;
-	__shared__ struct stats_udp stats_sh;
+	__shared__ struct MatrixCompletionInfo stats_sh;
 
 	doca_error_t ret;
 	struct doca_gpu_eth_rxq *rxq = NULL;
 	struct doca_gpu_semaphore_gpu *sem = NULL;
 	struct doca_gpu_buf *buf_ptr;
-	struct stats_udp stats_thread;
-	struct stats_udp *stats_global;
+	struct MatrixCompletionInfo stats_thread;
+	struct MatrixCompletionInfo *stats_global;
 	struct eth_ip_udp_hdr *hdr;
 	uintptr_t buf_addr;
 	uint64_t buf_idx = 0;
 	uint32_t lane_id = threadIdx.x % WARP_SIZE;
 	uint8_t *payload;
 	uint32_t sem_idx = 0;
-    uint32_t worker_number = blockIdx.x*blockDim.x+threadIdx.x;
+    // uint32_t worker_number = blockIdx.x*blockDim.x+threadIdx.x;
 	if (blockIdx.x == 0) {
 		rxq = rxq0;
 		sem = sem0;
@@ -109,14 +109,16 @@ __global__ void cuda_kernel_receive_udp_bw(uint32_t *exit_cond,
 		return;
 
 	if (threadIdx.x == 0) {
-		DOCA_GPUNETIO_VOLATILE(stats_sh.dns) = 0;
-		DOCA_GPUNETIO_VOLATILE(stats_sh.others) = 0;
+		DOCA_GPUNETIO_VOLATILE(stats_sh.received_chunks_a) = 0;
+		DOCA_GPUNETIO_VOLATILE(stats_sh.received_chunks_b) = 0;
+		DOCA_GPUNETIO_VOLATILE(stats_sh.received_chunk_num) = 0;
 	}
 	__syncthreads();
 
 	while (DOCA_GPUNETIO_VOLATILE(*exit_cond) == 0) {
-		stats_thread.dns = 0;
-		stats_thread.others = 0;
+		stats_thread.received_chunks_a = 0;
+		stats_thread.received_chunks_b = 0;
+		stats_thread.received_chunk_num=0;
 
 		/* No need to impose packet limit here as we want the max number of packets every time */
 		ret = doca_gpu_dev_eth_rxq_receive_block(rxq, 0, MAX_RX_TIMEOUT_NS, &rx_pkt_num, &rx_buf_idx);
@@ -154,14 +156,8 @@ __global__ void cuda_kernel_receive_udp_bw(uint32_t *exit_cond,
 			}
 
 			raw_to_udp(buf_addr, &hdr, &payload);
-
-			// print out the matrix chunk id
-
-			parse_matrix_packet(payload,mat_a,NULL);
-			// try to print out the hdr info
-			// printf("the src addr is %u,and the src port is %u \n",hdr->l3_hdr.src_addr,hdr->l4_hdr.src_port);
-			// printf("the dst addr is %u,and the dst port is %u\n",hdr->l3_hdr.dst_addr,hdr->l4_hdr.dst_port);
-			stats_thread.others++;
+			parse_matrix_packet(payload,mat_a,mat_b,&stats_thread);
+			// try to print out the hdr inf
 			/* Double-proof it's not reading old packets */
 			wipe_packet_32b((uint8_t*)&(hdr->l4_hdr));
 			buf_idx += blockDim.x;
@@ -171,14 +167,17 @@ __global__ void cuda_kernel_receive_udp_bw(uint32_t *exit_cond,
 
 #pragma unroll
 		for (int offset = 16; offset > 0; offset /= 2) {
-			stats_thread.dns += __shfl_down_sync(WARP_FULL_MASK, stats_thread.dns, offset);
-			stats_thread.others += __shfl_down_sync(WARP_FULL_MASK, stats_thread.others, offset);
+			stats_thread.received_chunks_a += __shfl_down_sync(WARP_FULL_MASK, stats_thread.received_chunks_a, offset);
+			stats_thread.received_chunks_b += __shfl_down_sync(WARP_FULL_MASK, stats_thread.received_chunks_b, offset);
+			stats_thread.received_chunk_num += __shfl_down_sync(WARP_FULL_MASK, stats_thread.received_chunk_num, offset);
 			__syncwarp();
 		}
 
 		if (lane_id == 0) {
-			atomicAdd_block((uint32_t *)&(stats_sh.dns), stats_thread.dns);
-			atomicAdd_block((uint32_t *)&(stats_sh.others), stats_thread.others);
+			atomicAdd_block((uint32_t *)&(stats_sh.received_chunks_a), stats_thread.received_chunks_a);
+			atomicAdd_block((uint32_t *)&(stats_sh.received_chunks_b), stats_thread.received_chunks_b);
+			atomicCAS_block((uint32_t *)&(stats_sh.total_chunks_a),0,stats_thread.total_chunks_a);
+			atomicAdd_block((uint32_t *)&(stats_sh.received_chunk_num), stats_thread.received_chunk_num);
 		}
 		__syncthreads();
 
@@ -190,16 +189,19 @@ __global__ void cuda_kernel_receive_udp_bw(uint32_t *exit_cond,
 				break;
 			}
 
-			DOCA_GPUNETIO_VOLATILE(stats_global->dns) = DOCA_GPUNETIO_VOLATILE(stats_sh.dns);
-			DOCA_GPUNETIO_VOLATILE(stats_global->others) = DOCA_GPUNETIO_VOLATILE(stats_sh.others);
-			DOCA_GPUNETIO_VOLATILE(stats_global->total) = rx_pkt_num;
+			DOCA_GPUNETIO_VOLATILE(stats_global->received_chunks_a) = DOCA_GPUNETIO_VOLATILE(stats_sh.received_chunks_a);
+			DOCA_GPUNETIO_VOLATILE(stats_global->received_chunks_b) = DOCA_GPUNETIO_VOLATILE(stats_sh.received_chunks_b);
+			DOCA_GPUNETIO_VOLATILE(stats_global->received_chunk_num) = DOCA_GPUNETIO_VOLATILE(stats_sh.received_chunk_num);
+			DOCA_GPUNETIO_VOLATILE(stats_global->total_chunks_a) = DOCA_GPUNETIO_VOLATILE(stats_sh.total_chunks_a);
+			DOCA_GPUNETIO_VOLATILE(stats_global->total_chunks_b) = DOCA_GPUNETIO_VOLATILE(stats_sh.total_chunks_a);
 			doca_gpu_dev_semaphore_set_status(sem, sem_idx, DOCA_GPU_SEMAPHORE_STATUS_READY);
 			__threadfence_system();
 
 			sem_idx = (sem_idx + 1) % sem_num;
 
-			DOCA_GPUNETIO_VOLATILE(stats_sh.dns) = 0;
-			DOCA_GPUNETIO_VOLATILE(stats_sh.others) = 0;
+			DOCA_GPUNETIO_VOLATILE(stats_sh.received_chunks_a) = 0;
+			DOCA_GPUNETIO_VOLATILE(stats_sh.received_chunks_b) = 0;
+			DOCA_GPUNETIO_VOLATILE(stats_sh.received_chunk_num) = 0;
 		}
 
 		__syncthreads();
@@ -208,7 +210,7 @@ __global__ void cuda_kernel_receive_udp_bw(uint32_t *exit_cond,
 
 extern "C" {
 
-doca_error_t kernel_receive_udp_bw(cudaStream_t stream, uint32_t *exit_cond, struct rxq_udp_bw_queues *udp_queues,float* mat_a)
+doca_error_t kernel_receive_udp_bw(cudaStream_t stream, uint32_t *exit_cond, struct rxq_udp_bw_queues *udp_queues,float* mat_a,float* mat_b)
 {
 	cudaError_t result = cudaSuccess;
 
@@ -229,7 +231,7 @@ doca_error_t kernel_receive_udp_bw(cudaStream_t stream, uint32_t *exit_cond, str
 									udp_queues->eth_rxq_gpu[0], udp_queues->eth_rxq_gpu[1], udp_queues->eth_rxq_gpu[2], udp_queues->eth_rxq_gpu[3],
 									udp_queues->nums,
 									udp_queues->sem_gpu[0], udp_queues->sem_gpu[1], udp_queues->sem_gpu[2], udp_queues->sem_gpu[3],mat_a
-									);
+									,mat_b);
 	result = cudaGetLastError();
 	if (cudaSuccess != result) {
 		DOCA_LOG_ERR("[%s:%d] cuda failed with %s \n", __FILE__, __LINE__, cudaGetErrorString(result));
