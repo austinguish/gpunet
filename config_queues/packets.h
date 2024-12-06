@@ -27,6 +27,8 @@
 #define DOCA_GPUNETIO_PACKETS_H
 
 #include "common.h"
+#include <stdio.h>
+#include <arpa/inet.h>
 
 #define TCP_PROTOCOL_ID 0x6
 #define UDP_PROTOCOL_ID 0x11
@@ -123,5 +125,8 @@ struct eth_ip_icmp_hdr {
 	struct ipv4_hdr l3_hdr;	 /* IP header */
 	struct icmp_hdr l4_hdr;	 /* ICMP header */
 } __attribute__((__packed__));
+
+
+
 
 #endif /* DOCA_GPUNETIO_PACKETS_H */

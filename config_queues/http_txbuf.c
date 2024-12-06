@@ -33,6 +33,7 @@
 #include "common.h"
 #include "packets.h"
 #include "dpdk_tcp/tcp_session_table.h"
+#include "matmul/mat_message.h"
 
 DOCA_LOG_REGISTER(GPU_PACKET_PROCESSING_TXBUF);
 
@@ -332,4 +333,72 @@ doca_error_t destroy_tx_buf(struct tx_buf *buf)
 	}
 
 	return status;
+}
+
+
+doca_error_t prepare_resp_tx_buf(struct tx_buf *buf)
+{
+    uint8_t *cpu_pkt_addr;
+    uint8_t *pkt;
+    struct eth_ip_udp_hdr *hdr;
+    uint8_t *payload;
+    cudaError_t res_cuda;
+
+
+    if (payload == NULL) {
+        DOCA_LOG_ERR("Failed to allocate payload memory");
+        return DOCA_ERROR_NO_MEMORY;
+    }
+
+    buf->pkt_nbytes = MAX_FLOATS_PER_PACKET*sizeof(float);
+    cpu_pkt_addr = (uint8_t *)calloc(buf->num_packets * buf->max_pkt_sz, sizeof(uint8_t));
+    if (cpu_pkt_addr == NULL) {
+        DOCA_LOG_ERR("Error in txbuf preparation, failed to allocate memory");
+        return DOCA_ERROR_NO_MEMORY;
+    }
+
+    // fill the data
+    for (uint32_t idx = 0; idx < buf->num_packets; idx++) {
+        pkt = cpu_pkt_addr + (idx * buf->max_pkt_sz);
+        hdr = (struct eth_ip_udp_hdr *)pkt;
+
+        // Ethernet header
+        hdr->l2_hdr.ether_type = rte_cpu_to_be_16(DOCA_FLOW_ETHER_TYPE_IPV4);
+
+        // IP header
+        hdr->l3_hdr.version_ihl = 0x45;
+        hdr->l3_hdr.type_of_service = 0x0;
+        hdr->l3_hdr.total_length =
+            BYTE_SWAP16(sizeof(struct ipv4_hdr) + sizeof(struct udp_hdr) + buf->pkt_nbytes);
+        hdr->l3_hdr.packet_id = 0;
+        hdr->l3_hdr.fragment_offset = 0;
+        hdr->l3_hdr.time_to_live = 64;
+        hdr->l3_hdr.next_proto_id = IPPROTO_UDP;
+        hdr->l3_hdr.hdr_checksum = 0;
+        hdr->l3_hdr.src_addr = 0;
+        hdr->l3_hdr.dst_addr = 0;
+
+        // UDP header
+        hdr->l4_hdr.src_port = 0;
+        hdr->l4_hdr.dst_port = 9943;
+        hdr->l4_hdr.dgram_len = BYTE_SWAP16(sizeof(struct udp_hdr) + buf->pkt_nbytes);
+        hdr->l4_hdr.dgram_cksum = 0;
+    }
+
+    // copy to cuda_memory
+    res_cuda = cudaMemcpy(buf->gpu_pkt_addr, cpu_pkt_addr,
+                         buf->num_packets * buf->max_pkt_sz,
+                         cudaMemcpyDefault);
+
+    // check cuda error
+    if (res_cuda != cudaSuccess) {
+        DOCA_LOG_ERR("Function CUDA Memcpy cqe_addr failed with %s",
+                     cudaGetErrorString(res_cuda));
+        free(cpu_pkt_addr);
+        return DOCA_ERROR_DRIVER;
+    }
+
+    // free the cpu_pkt_addr
+    free(cpu_pkt_addr);
+    return DOCA_SUCCESS;
 }

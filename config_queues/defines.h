@@ -82,7 +82,7 @@
 
 /* Each thread in the HTTP server CUDA kernel warp has it's own subset of 32 buffers */
 #define TX_BUF_NUM 1024 /* 32 x 32 */
-#define TX_BUF_MAX_SZ 512
+#define TX_BUF_MAX_SZ 8192
 #define FLOW_NB_COUNTERS 524228 /* 1024 x 512 */
 /* DPDK port to accept new TCP connections */
 #define DPDK_DEFAULT_PORT 0

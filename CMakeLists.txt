@@ -141,6 +141,7 @@ set(CUDA_SOURCES
         ${CMAKE_SOURCE_DIR}/gpu_kernels/http_server.cu
         ${CMAKE_SOURCE_DIR}/gpu_kernels/tcp_bw.cu
         ${CMAKE_SOURCE_DIR}/gpu_kernels/udp.cu
+        ${CMAKE_SOURCE_DIR}/gpu_kernels/udp_send.cu
 )
 # Create CUDA library for device code
 add_library(gpu_kernels STATIC ${CUDA_SOURCES})
@@ -245,6 +246,7 @@ target_link_libraries(matrix_mult
         resolv
         cudart
         cuda
+        cublas
         pthread
         bsd
 )
@@ -258,6 +260,40 @@ foreach(lib ${DPDK_LIBS})
 endforeach()
 
 
+# Add matrix UDP receiver executable
+set(MATRIX_UDP_SOURCES
+        ${CMAKE_SOURCE_DIR}/mat_mul_cpu.cu
+)
+
+add_executable(matrix_udp_receiver ${MATRIX_UDP_SOURCES})
+
+# Link libraries
+target_link_libraries(matrix_udp_receiver
+        resolv
+        pthread
+        bsd
+        cudart
+        cublas
+)
+
+# Link DPDK libraries
+foreach(lib ${DPDK_LIBS})
+    target_link_libraries(matrix_udp_receiver
+            /opt/mellanox/dpdk/lib/x86_64-linux-gnu/lib${lib}.so
+    )
+endforeach()
+
+# Set CUDA compile options
+set_target_properties(matrix_udp_receiver PROPERTIES
+        CUDA_SEPARABLE_COMPILATION ON
+        POSITION_INDEPENDENT_CODE ON
+)
+
+if(CMAKE_BUILD_TYPE MATCHES Debug)
+    target_compile_definitions(matrix_udp_receiver PRIVATE
+            -DRTE_LOG_LEVEL=RTE_LOG_DEBUG
+    )
+endif()
 
 
 

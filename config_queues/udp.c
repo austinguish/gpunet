@@ -355,6 +355,28 @@ doca_error_t create_udp_bw_queues(struct rxq_udp_bw_queues* udp_queues,
         }
     }
 
+
+
+
+    result = create_tx_buf(&udp_queues->buf_response,
+                                   udp_queues->gpu_dev,
+                                   udp_queues->ddev,
+                                  TX_BUF_NUM,
+                                  TX_BUF_MAX_SZ);
+    if (result != DOCA_SUCCESS)
+    {
+        DOCA_LOG_ERR("Failed create buf_page_contacts: %s", doca_error_get_descr(result));
+        destroy_udp_bw_queues(udp_queues);
+        return DOCA_ERROR_BAD_STATE;
+    }
+    result = prepare_resp_tx_buf(&udp_queues->buf_response);
+    if (result != DOCA_SUCCESS)
+    {
+        DOCA_LOG_ERR("Failed prepare the response buf: %s", doca_error_get_descr(result));
+        destroy_udp_bw_queues(udp_queues);
+        return DOCA_ERROR_BAD_STATE;
+    }
+
     /* Create UDP based flow pipe */
     result = create_udp_bw_pipe(udp_queues, df_port);
     if (result != DOCA_SUCCESS)
@@ -438,6 +460,12 @@ doca_error_t destroy_udp_bw_queues(struct rxq_udp_bw_queues* udp_queues)
             DOCA_LOG_ERR("Failed doca_eth_rxq_destroy: %s", doca_error_get_descr(result));
             return DOCA_ERROR_BAD_STATE;
         }
+    }
+    result = destroy_tx_buf(&udp_queues->buf_response);
+    if (result != DOCA_SUCCESS)
+    {
+        DOCA_LOG_ERR("Failed create buf_page_contacts: %s", doca_error_get_descr(result));
+        return DOCA_ERROR_BAD_STATE;
     }
 
     return DOCA_SUCCESS;

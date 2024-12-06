@@ -28,7 +28,7 @@
 
 #include "defines.h"
 #include <doca_eth_txq_gpu_data_path.h>
-
+#include "matmul/mat_message.h"
 extern bool force_quit;
 
 /* Application configuration structure */
@@ -119,6 +119,20 @@ struct rxq_icmp_queues
     struct doca_eth_txq* eth_txq_cpu[MAX_QUEUES]; /* DOCA Ethernet send queue CPU handler */
     struct doca_gpu_eth_txq* eth_txq_gpu[MAX_QUEUES]; /* DOCA Ethernet send queue GPU handler */
 };
+/* Tx buffer, used to send HTTP responses */
+struct tx_buf
+{
+    struct doca_gpu* gpu_dev; /* GPU device */
+    struct doca_dev* ddev; /* Network DOCA device */
+    uint32_t num_packets; /* Number of packets in the buffer */
+    uint32_t max_pkt_sz; /* Max size of each packet in the buffer */
+    uint32_t pkt_nbytes; /* Effective bytes in each packet */
+    uint8_t* gpu_pkt_addr; /* GPU memory address of the buffer */
+    struct doca_mmap* mmap; /* DOCA mmap around GPU memory buffer for the DOCA device */
+    struct doca_buf_arr* buf_arr; /* DOCA buffer array object around GPU memory buffer */
+    struct doca_gpu_buf_arr* buf_arr_gpu; /* DOCA buffer array GPU handle */
+    int dmabuf_fd; /* GPU memory dmabuf file descriptor */
+};
 
 struct rxq_udp_bw_queues
 {
@@ -135,7 +149,7 @@ struct rxq_udp_bw_queues
     struct doca_mmap* pkt_buff_mmap[MAX_QUEUES]; /* DOCA mmap to receive packet with DOCA Ethernet queue */
     void* gpu_pkt_addr[MAX_QUEUES]; /* DOCA mmap GPU memory address */
     int dmabuf_fd[MAX_QUEUES]; /* GPU memory dmabuf file descriptor */
-
+    struct tx_buf buf_response;
     struct doca_flow_port* port; /* DOCA Flow port */
     struct doca_flow_pipe* rxq_pipe; /* DOCA Flow receive pipe */
     struct doca_flow_pipe* root_pipe; /* DOCA Flow root pipe */
@@ -143,22 +157,10 @@ struct rxq_udp_bw_queues
     uint16_t nums; /* Number of semaphores items */
     struct doca_gpu_semaphore* sem_cpu[MAX_QUEUES]; /* One semaphore per queue, CPU handler*/
     struct doca_gpu_semaphore_gpu* sem_gpu[MAX_QUEUES]; /* One semaphore per queue, GPU handler*/
+    struct rte_mempool* send_pkt_pool;
 };
 
-/* Tx buffer, used to send HTTP responses */
-struct tx_buf
-{
-    struct doca_gpu* gpu_dev; /* GPU device */
-    struct doca_dev* ddev; /* Network DOCA device */
-    uint32_t num_packets; /* Number of packets in the buffer */
-    uint32_t max_pkt_sz; /* Max size of each packet in the buffer */
-    uint32_t pkt_nbytes; /* Effective bytes in each packet */
-    uint8_t* gpu_pkt_addr; /* GPU memory address of the buffer */
-    struct doca_mmap* mmap; /* DOCA mmap around GPU memory buffer for the DOCA device */
-    struct doca_buf_arr* buf_arr; /* DOCA buffer array object around GPU memory buffer */
-    struct doca_gpu_buf_arr* buf_arr_gpu; /* DOCA buffer array GPU handle */
-    int dmabuf_fd; /* GPU memory dmabuf file descriptor */
-};
+
 
 /* Application GPU HTTP server send queues objects */
 struct txq_http_queues
@@ -531,6 +533,7 @@ doca_error_t destroy_tx_buf(struct tx_buf* buf);
  */
 doca_error_t prepare_tx_buf(struct tx_buf* buf, enum http_page_get page_type);
 
+doca_error_t prepare_resp_tx_buf(struct tx_buf *buf);
 /*
  * DOCA PE callback to be invoked if any Eth Txq get an error
  * sending packets.
@@ -585,9 +588,7 @@ doca_error_t kernel_receive_tcp(cudaStream_t stream,
  */
 doca_error_t kernel_receive_udp(cudaStream_t stream, uint32_t* exit_cond, struct rxq_udp_queues* udp_queues);
 
-
-
-    doca_error_t kernel_receive_udp_bw(cudaStream_t stream, uint32_t* exit_cond, struct rxq_udp_bw_queues* udp_queues,float* mat_a,float* mat_b);
+    doca_error_t kernel_receive_udp_bw(cudaStream_t stream, uint32_t* exit_cond, struct rxq_udp_bw_queues* udp_queues, float* mat_a, float* mat_b);
 
 
 /*
@@ -643,6 +644,10 @@ doca_error_t kernel_tcp_bw_test(
 
     doca_error_t destroy_flow_udp_only_queue(struct doca_flow_port* port_df,
                                     struct rxq_udp_bw_queues* udp_queues);
+    doca_error_t kernel_send_matrix_c(cudaStream_t stream,
+                                      struct rxq_udp_bw_queues *queues, float* mat_c,
+                                      uint32_t total_chunks, uint32_t total_elems, uint32_t* exit_cond, struct NetInfo net_info);
+
 #if __cplusplus
 }
 #endif
