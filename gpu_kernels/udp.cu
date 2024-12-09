@@ -303,6 +303,7 @@ __global__ void cuda_kernel_receive_udp_bw(uint32_t *exit_cond,
 
 		__syncthreads();
 	}
+	//printf("GPU exiting!");
 }
 
 extern "C" {

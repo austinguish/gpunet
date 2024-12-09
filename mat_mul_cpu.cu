@@ -10,7 +10,38 @@
 #include <cublas_v2.h>
 #include "mat_message.h"
 #include "defines.h"
+#include <rte_ether.h>
+#include <rte_ip.h>
+#include <rte_udp.h>
 
+static inline int is_target_packet(struct rte_mbuf *mbuf) {
+    // 1. 获取以太网头
+    struct rte_ether_hdr *eth_hdr = rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
+
+    // 检查是否是IPv4包
+    if (rte_be_to_cpu_16(eth_hdr->ether_type) != RTE_ETHER_TYPE_IPV4) {
+        return 0;
+    }
+
+    // 2. 获取IP头
+    struct rte_ipv4_hdr *ip_hdr = (struct rte_ipv4_hdr *)(eth_hdr + 1);
+
+    // 检查是否是UDP包
+    if (ip_hdr->next_proto_id != IPPROTO_UDP) {
+        return 0;
+    }
+
+    // 3. 获取UDP头
+    struct rte_udp_hdr *udp_hdr = (struct rte_udp_hdr *)((unsigned char *)ip_hdr +
+                                  (ip_hdr->version_ihl & RTE_IPV4_HDR_IHL_MASK) * 4);
+
+    // 检查目标端口是否为2574
+    if (rte_be_to_cpu_16(udp_hdr->dst_port) != 2574) {
+        return 0;
+    }
+
+    return 1;
+}
 #define RX_RING_SIZE 1024
 #define TX_RING_SIZE 1024
 #define NUM_MBUFS 8191
@@ -200,6 +231,7 @@ int main(int argc, char *argv[]) {
     struct rte_mbuf *bufs[BURST_SIZE];
 
     while (1) {
+        struct rte_mbuf *bufs[BURST_SIZE];
         const uint16_t nb_rx = rte_eth_rx_burst(port_id, 0, bufs, BURST_SIZE);
 
         if (nb_rx == 0) {
@@ -207,19 +239,21 @@ int main(int argc, char *argv[]) {
         }
 
         for (uint16_t i = 0; i < nb_rx; i++) {
-            struct MatrixMessage *msg = rte_pktmbuf_mtod(bufs[i], struct MatrixMessage *);
+            if (!is_target_packet(bufs[i])) {
+                // 不是目标包，直接释放
+                rte_pktmbuf_free(bufs[i]);
+                continue;
+            }
+
+            // 是目标包，进行处理
+            struct MatrixMessage *msg = rte_pktmbuf_mtod_offset(bufs[i],
+                                      struct MatrixMessage *,
+                                      sizeof(struct rte_ether_hdr) +
+                                      sizeof(struct rte_ipv4_hdr) +
+                                      sizeof(struct rte_udp_hdr));
+
             process_matrix_packet(msg);
             rte_pktmbuf_free(bufs[i]);
-        }
-
-        if (check_matrix_completion()) {
-            // Perform matrix multiplication (example dimensions)
-            uint32_t m = 1024, n = 1024, k = 1024;
-            perform_matrix_multiplication(m, n, k);
-            send_result_matrix(port_id, m, n);
-
-            // Reset completion info for next computation
-            memset(&completion_info, 0, sizeof(completion_info));
         }
     }
 

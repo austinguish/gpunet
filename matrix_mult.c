@@ -35,80 +35,13 @@
 #include "dpdk_tcp/tcp_cpu_rss_func.h"
 #include "matmul/mat_message.h"
 #include "packets.h"
-
+#include "matmul/send_by_cpu.h"
+#include "matmul/compute.h"
 
 #define SLEEP_IN_NANOS (10 * 1000) /* Sample the PE every 10 microseconds  */
 
 DOCA_LOG_REGISTER(GPU_PACKET_PROCESSING);
-static struct rte_mbuf* prepare_matrix_packet(struct rte_mempool *mp,
-                                            const float *data,
-                                            uint32_t matrix_id,
-                                            uint32_t chunk_id,
-                                            uint32_t total_chunks,
-                                            uint32_t chunk_size,
-                                            const struct MatrixCompletionInfo *net_info) {
-    struct rte_mbuf *pkt = rte_pktmbuf_alloc(mp);
-    if (pkt == NULL) {
-        DOCA_LOG_ERR("Failed to allocate mbuf");
-        return NULL;
-    }
-
-    // 为整个包分配空间
-    size_t total_size = sizeof(struct ether_hdr) + sizeof(struct ipv4_hdr) +
-                       sizeof(struct udp_hdr) + sizeof(struct MatrixPacketHeader) +
-                       chunk_size * sizeof(float);
-
-    // prepare the packet
-    char *payload = rte_pktmbuf_mtod(pkt, char *);
-
-    // 1. prepare ethernet header
-    struct ether_hdr *eth_hdr = (struct ether_hdr *)payload;
-    memcpy(&eth_hdr->d_addr_bytes, net_info->net_info.eth_src_addr_bytes, ETHER_ADDR_LEN);
-    memcpy(&eth_hdr->s_addr_bytes, net_info->net_info.eth_dst_addr_bytes, ETHER_ADDR_LEN);
-    eth_hdr->ether_type = htons(DOCA_FLOW_ETHER_TYPE_IPV4);
-
-    // 2. prepare ip header
-    struct ipv4_hdr *ip_hdr = (struct ipv4_hdr *)(eth_hdr + 1);
-    ip_hdr->version_ihl = 0x45; // IPv4, 5 * 4 bytes header length
-    ip_hdr->type_of_service = 0;
-    ip_hdr->total_length = htons(total_size - sizeof(struct ether_hdr));
-    ip_hdr->packet_id = 0;
-    ip_hdr->fragment_offset = 0;
-    ip_hdr->time_to_live = 64;
-    ip_hdr->next_proto_id = IPPROTO_UDP;
-    ip_hdr->src_addr = inet_addr("10.134.11.66");
-    ip_hdr->dst_addr = inet_addr("10.134.11.61");
-    ip_hdr->hdr_checksum = 0;
-    ip_hdr->hdr_checksum = rte_ipv4_cksum(ip_hdr);
-
-    // 3. prepare the udp header
-    struct udp_hdr *udp_hdr = (struct udp_hdr *)(ip_hdr + 1);
-    udp_hdr->src_port = htons(1234);
-    udp_hdr->dst_port = htons(5678);
-    udp_hdr->dgram_len = htons(sizeof(struct udp_hdr) + sizeof(struct MatrixPacketHeader) +
-                              chunk_size * sizeof(float));
-
-    // 4. data header
-    struct MatrixPacketHeader *mat_hdr = (struct MatrixPacketHeader *)(udp_hdr + 1);
-    mat_hdr->matrix_id = matrix_id;
-    mat_hdr->chunk_id = chunk_id;
-    mat_hdr->total_chunks = total_chunks;
-    mat_hdr->chunk_size = chunk_size;
-
-    // 5. copy matrix
-    float *matrix_data = (float *)(mat_hdr + 1);
-    memcpy(matrix_data, data, chunk_size * sizeof(float));
-
-    // 6. set the checksum
-    udp_hdr->dgram_cksum = 0;
-    udp_hdr->dgram_cksum = rte_ipv4_udptcp_cksum(ip_hdr, udp_hdr);
-
-    // sent the packet
-    pkt->data_len = total_size;
-    pkt->pkt_len = pkt->data_len;
-
-    return pkt;
-}
+static uint64_t tcp_last_packet_time = 0;
 bool force_quit;
 static struct doca_gpu *gpu_dev;
 static struct app_gpu_cfg app_cfg = {0};
@@ -126,93 +59,6 @@ cudaStream_t tx_udp_stream;
 uint32_t *rx_cpu_exit_condition;
 uint32_t *rx_gpu_exit_condition;
 /* Function to perform matrix multiplication using cuBLAS with dynamic matrix size */
-cudaError_t perform_matrix_multiplication(float* A, float* B, float* C, int matrix_size, cudaStream_t stream) {
-	printf("Starting matrix multiplication debug\n");
-
-    // Create events for timing
-    cudaEvent_t start, stop;
-    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
-
-    // Check initial CUDA status
-    cudaError_t cuda_status = cudaGetLastError();
-    printf("Initial CUDA status: %s\n", cudaGetErrorString(cuda_status));
-
-    // Initialize cuBLAS
-    cublasHandle_t handle;
-    cublasStatus_t status = cublasCreate(&handle);
-    printf("cuBLAS creation status: %d\n", status);
-
-    // Set stream
-    status = cublasSetStream(handle, stream);
-    printf("Stream set status: %d\n", status);
-
-    // Verify input data
- //    float *test_A = (float *)malloc(matrix_size * matrix_size * sizeof(float));
- //    cudaMemcpy(test_A, A, matrix_size * matrix_size * sizeof(float), cudaMemcpyDeviceToHost);
- //    printf("First 5 elements of A: ");
- //    for (int i = 0; i < 16; i++) {
- //        printf("%f ", test_A[i]);
- //    }
- //    printf("\n");
- //    free(test_A);
- //
-	// float *test_B = (float *)malloc(matrix_size * matrix_size * sizeof(float));
-	// cudaMemcpy(test_B, B, matrix_size * matrix_size * sizeof(float), cudaMemcpyDeviceToHost);
-	// printf("First 5 elements of B: ");
-	// for (int i = 0; i < 16; i++) {
-	// 	printf("%f ", test_B[i]);
-	// }
-	// printf("\n");
-	// free(test_B);
-
-    const float alpha = 1.0f;
-    const float beta = 0.0f;
-
-    // Record start time
-    cudaEventRecord(start, stream);
-    printf("Starting SGEMM operation...\n");
-	cudaStreamSynchronize(rx_udp_stream);
-    // Perform multiplication
-    status = cublasSgemm(handle,
-                        CUBLAS_OP_T,
-                        CUBLAS_OP_T,
-                        matrix_size,
-                        matrix_size,
-                        matrix_size,
-                        &alpha,
-                        A,
-                        matrix_size,
-                        B,
-                        matrix_size,
-                        &beta,
-                        C,
-                        matrix_size);
-
-    printf("SGEMM status: %d\n", status);
-
-    // Record end time
-    cudaEventRecord(stop, stream);
-
-    // Wait for completion
-    cudaStreamSynchronize(stream);
-
-    // Calculate execution time
-    float milliseconds = 0;
-    cudaEventElapsedTime(&milliseconds, start, stop);
-    printf("SGEMM execution time: %f ms\n", milliseconds);
-
-    // Final status check
-    cuda_status = cudaGetLastError();
-    printf("Final CUDA status: %s\n", cudaGetErrorString(cuda_status));
-
-    // Cleanup
-    cudaEventDestroy(start);
-    cudaEventDestroy(stop);
-    cublasDestroy(handle);
-
-    return cuda_status;
-}
 
 /*
  * DOCA PE callback to be invoked if any Eth Txq get an error
@@ -230,6 +76,35 @@ void error_send_udp_packet_cb(struct doca_eth_txq_gpu_event_error_send_packet *e
 		      event_user_data.u64,
 		      packet_index);
 	DOCA_GPUNETIO_VOLATILE(force_quit) = true;
+}
+
+void debug_send_packet_udp_bw_cb(struct doca_eth_txq_gpu_event_notify_send_packet *event_notify,
+								union doca_data event_user_data)
+{
+	uint16_t packet_index;
+	uint64_t packet_timestamp;
+	uint64_t ts_diff = 0;
+
+	// 获取包的位置信息
+	doca_eth_txq_gpu_event_notify_send_packet_get_position(event_notify, &packet_index);
+
+	// 获取包的时间戳
+	doca_eth_txq_gpu_event_notify_send_packet_get_timestamp(event_notify, &packet_timestamp);
+
+	// 计算与上一个包的时间差
+	if (tcp_last_packet_time != 0) {
+		ts_diff = packet_timestamp - tcp_last_packet_time;
+	}
+
+	// 记录调试信息
+	DOCA_LOG_INFO("TCP BW debug event: Queue %ld packet %d sent at %ld, interval %.6f sec",
+				  event_user_data.u64,
+				  packet_index,
+				  packet_timestamp,
+				  (double)((ts_diff > 0 ? ((double)ts_diff) / 1000000000.0 : 0)));
+
+	// 更新最后一个包的时间戳
+	tcp_last_packet_time = packet_timestamp;
 }
 
 /*
@@ -259,11 +134,7 @@ static uint64_t get_ns(uint64_t *sec)
 	return (uint64_t)t.tv_nsec + (uint64_t)t.tv_sec * 1000 * 1000 * 1000;
 }
 
-/*
- * CPU thread to print statistics from GPU filtering on the console
- *
- * @args [in]: thread input args
- */
+
 static void stats_core(void *args)
 {
 	(void)args;
@@ -282,7 +153,8 @@ static void stats_core(void *args)
 	interval_print = get_ns(&interval_sec);
 	while (DOCA_GPUNETIO_VOLATILE(force_quit) == false) {
 		/* Check UDP packets */
-		for (int idxq = 0; idxq < udp_queues.numq; idxq++) {
+		for (int idxq = 0; idxq < udp_queues.numq; idxq++)
+		{
 			result = doca_gpu_semaphore_get_status(udp_queues.sem_cpu[idxq], sem_idx_udp[idxq], &status);
 			if (result != DOCA_SUCCESS) {
 				DOCA_LOG_ERR("UDP semaphore error");
@@ -307,10 +179,10 @@ static void stats_core(void *args)
 				printf("\n=== Ethernet Header ===\n");
 				printf("Destination MAC: %02x:%02x:%02x:%02x:%02x:%02x\n",
 					   completion_info->net_info.eth_dst_addr_bytes[0],  completion_info->net_info.eth_dst_addr_bytes[1],
-					    completion_info->net_info.eth_dst_addr_bytes[2],  completion_info->net_info.eth_dst_addr_bytes[3],
-					    completion_info->net_info.eth_dst_addr_bytes[4],  completion_info->net_info.eth_dst_addr_bytes[5]);
+						completion_info->net_info.eth_dst_addr_bytes[2],  completion_info->net_info.eth_dst_addr_bytes[3],
+						completion_info->net_info.eth_dst_addr_bytes[4],  completion_info->net_info.eth_dst_addr_bytes[5]);
 				printf("Source MAC: %02x:%02x:%02x:%02x:%02x:%02x\n",
-					    completion_info->net_info.eth_src_addr_bytes[0], completion_info->net_info.eth_src_addr_bytes[1],
+						completion_info->net_info.eth_src_addr_bytes[0], completion_info->net_info.eth_src_addr_bytes[1],
 					   completion_info->net_info.eth_src_addr_bytes[2], completion_info->net_info.eth_src_addr_bytes[3],
 					   completion_info->net_info.eth_src_addr_bytes[4], completion_info->net_info.eth_src_addr_bytes[5]);
 				printf("\n=== IPv4 Header ===\n");
@@ -327,102 +199,59 @@ static void stats_core(void *args)
 				udp_st[idxq].total_chunks_b = completion_info->total_chunks_b;
 				// todo maybe in different block
 				udp_st[idxq].received_chunk_num += completion_info->received_chunk_num;
-                if (udp_st[idxq].received_chunk_num == 2*udp_st[idxq].total_chunks_a)
-                {
+				if (udp_st[idxq].received_chunk_num == 2*udp_st[idxq].total_chunks_a)
+				{
 
-                	printf("received all the chunks great\n");
-                	printf("UDP receive paused, starting matrix multiplication\n");
-                	DOCA_GPUNETIO_VOLATILE(*rx_cpu_exit_condition) = 1;
-                	// Calculate matrix dimensions based on received chunks
-                	int matrix_size = (int)sqrt((double)udp_st[idxq].received_a_elems);
-                	printf("Matrix size calculated as %d x %d\n", matrix_size, matrix_size);
+					printf("received all the chunks great\n");
+					printf("UDP receive paused, starting matrix multiplication\n");
+					DOCA_GPUNETIO_VOLATILE(*rx_cpu_exit_condition) = 1;
+					cudaStreamSynchronize(rx_udp_stream);
+					printf("Receive kernel stopped, starting computation\n");
+					// Calculate matrix dimensions based on received chunks
+					int matrix_size = (int)sqrt((double)udp_st[idxq].received_a_elems);
+					printf("Matrix size calculated as %d x %d\n", matrix_size, matrix_size);
 
-                	// Perform matrix multiplication in separate stream
-                	cudaError_t err = perform_matrix_multiplication(A, B, C, matrix_size, compute_stream);
-                	if (err != cudaSuccess) {
-                		printf("Matrix multiplication failed: %s\n", cudaGetErrorString(err));
-                		DOCA_GPUNETIO_VOLATILE(force_quit) = true;
-                		return;
-                	}
+					// Perform matrix multiplication in separate stream
+					cudaError_t err = perform_matrix_multiplication(A, B, C, matrix_size, compute_stream,rx_udp_stream);
+					if (err != cudaSuccess) {
+						printf("Matrix multiplication failed: %s\n", cudaGetErrorString(err));
+						DOCA_GPUNETIO_VOLATILE(force_quit) = true;
+						return;
+					}
 
-                	// Wait for computation to complete
-                	cudaStreamSynchronize(compute_stream);
-                	DOCA_GPUNETIO_VOLATILE(*rx_cpu_exit_condition) = 0;
-                	// call the send function
-                	// todo need to debug to see what happend
-                	//kernel_send_matrix_c(tx_udp_stream,&udp_queues,C,udp_st[idxq].total_chunks_a,udp_st[idxq].received_a_elems,rx_gpu_exit_condition,completion_info->net_info);
-                	// Copy results back to CPU for verification
-                	float *C_CPU = (float *)malloc(matrix_size * matrix_size * sizeof(float));
-                	if (C_CPU) {
-                		cudaMemcpy(C_CPU, C, matrix_size * matrix_size * sizeof(float), cudaMemcpyDeviceToHost);
-                        size_t total_floats = matrix_size * matrix_size;
-                        uint32_t total_chunks = (total_floats + MAX_FLOATS_PER_PACKET - 1) / MAX_FLOATS_PER_PACKET;
-
-                        printf("Sending result matrix in %u chunks\n", total_chunks);
-
-                        // 分块发送结果矩阵
-                        for (uint32_t chunk_id = 0; chunk_id < total_chunks; chunk_id++) {
-                            size_t start_idx = chunk_id * MAX_FLOATS_PER_PACKET;
-                            size_t chunk_size = (start_idx + MAX_FLOATS_PER_PACKET > total_floats) ?
-                                              (total_floats - start_idx) : MAX_FLOATS_PER_PACKET;
-
-                            // 准备并发送包
-                            struct rte_mbuf *pkt = prepare_matrix_packet(
-                                &udp_queues.send_pkt_pool[0],
-                                C_CPU + start_idx,
-                                2,
-                                chunk_id,
-                                total_chunks,
-                                chunk_size,
-                                completion_info
-                            );
-
-                            if (pkt == NULL) {
-                                printf("Failed to prepare packet for chunk %u\n", chunk_id);
-                                continue;
-                            }
-
-                            // 发送包
-                            uint16_t nb_tx = rte_eth_tx_burst(dpdk_dev_port_id, 0, &pkt, 1);
-                            if (nb_tx == 0) {
-                                printf("Failed to send packet for chunk %u\n", chunk_id);
-                                rte_pktmbuf_free(pkt);
-                            } else {
-                                //printf("Sent chunk %u/%u for result matrix\n", chunk_id + 1, total_chunks);
-                            }
-
-                            // 添加小延迟避免包丢失
-                            rte_delay_us_block(1000);  // 1ms delay
-                        }
-
-
-                		printf("First few elements of result matrix C:\n");
-                		int elements_to_print = (5 < matrix_size * matrix_size) ? 5 : (matrix_size * matrix_size);
-                		for (int i = 0; i < elements_to_print; i++) {
-                			printf("C[%d]=%f\n", i, C_CPU[i]);
-                		}
-                		free(C_CPU);
-                	}
-
-                	DOCA_GPUNETIO_VOLATILE(*rx_cpu_exit_condition) = 0;
-                	// kernel_receive_udp_bw(rx_udp_stream, gpu_exit_condition, &udp_queues,A,B);
-                }
-
-
-
+					// Wait for computation to complete
+					cudaStreamSynchronize(compute_stream);
+					//send_by_cpu(matrix_size,completion_info,C,dpdk_dev_port_id,udp_queues.send_pkt_pool);
+					kernel_send_matrix_c(tx_udp_stream,&udp_queues,C,udp_st[idxq].total_chunks_a,completion_info);
+				}
+				// // call the send function
+				// // todo need to debug to see what happened
+				// memset(&udp_st[idxq], 0, sizeof(struct MatrixCompletionInfo));
+				//
+				// // 6. restart receive stream
+				// DOCA_GPUNETIO_VOLATILE(*rx_cpu_exit_condition) = 0;
+				// cudaStreamSynchronize(rx_udp_stream);
+				// kernel_receive_udp_bw(rx_udp_stream, rx_gpu_exit_condition, &udp_queues, A, B);
+				//
+				// // check this stream
+				// cudaError_t status = cudaStreamQuery(rx_udp_stream);
+				// if (status != cudaErrorNotReady) {  // 如果不是"还在运行"，说明出错了
+				// 	printf("Failed to restart receive kernel: %s\n", cudaGetErrorString(status));
+				// 	DOCA_GPUNETIO_VOLATILE(force_quit) = true;
+				// 	return;
+				// }
+				// printf("Receive kernel successfully restarted\n");
 				result = doca_gpu_semaphore_set_status(udp_queues.sem_cpu[idxq],
-								       sem_idx_udp[idxq],
-								       DOCA_GPU_SEMAPHORE_STATUS_FREE);
+									   sem_idx_udp[idxq],
+									   DOCA_GPU_SEMAPHORE_STATUS_FREE);
+				sem_idx_udp[idxq] = (sem_idx_udp[idxq] + 1) % udp_queues.nums;
 				if (result != DOCA_SUCCESS) {
 					DOCA_LOG_ERR("UDP semaphore %d error", sem_idx_udp[idxq]);
 					DOCA_GPUNETIO_VOLATILE(force_quit) = true;
 					return;
 				}
-
-				sem_idx_udp[idxq] = (sem_idx_udp[idxq] + 1) % udp_queues.nums;
 			}
 		}
-
 		/* Check TCP packets */
 
 		if ((get_ns(&interval_sec) - interval_print) > 5000000000) {
@@ -552,7 +381,7 @@ int main(int argc, char **argv)
 	}
 
 
-	result = create_udp_bw_queues(&udp_queues, df_port, gpu_dev, ddev, pe, app_cfg.queue_num, SEMAPHORES_PER_QUEUE, error_send_udp_packet_cb);
+	result = create_udp_bw_queues(&udp_queues, df_port, gpu_dev, ddev, pe, app_cfg.queue_num, SEMAPHORES_PER_QUEUE, &error_send_udp_packet_cb,  &debug_send_packet_udp_bw_cb);
 	if (result != DOCA_SUCCESS) {
 		DOCA_LOG_ERR("Function create_udp_queues returned %s", doca_error_get_descr(result));
 		return EXIT_FAILURE;

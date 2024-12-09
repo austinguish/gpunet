@@ -100,7 +100,6 @@ find_library(DOCA_FLOW_CT_LIB doca_flow_ct PATHS /opt/mellanox/doca/lib/x86_64-l
 find_library(DOCA_FLOW_TUNE_LIB doca_flow_tune_server PATHS /opt/mellanox/doca/lib/x86_64-linux-gnu REQUIRED)
 find_library(DOCA_COMMON_LIB doca_common PATHS /opt/mellanox/doca/lib/x86_64-linux-gnu REQUIRED)
 
-# 移除重复的源文件
 set(COMMON_SOURCES
         ${CMAKE_SOURCE_DIR}/config_queues/device.c
         ${CMAKE_SOURCE_DIR}/config_queues/args.c
@@ -125,6 +124,7 @@ set(C_SOURCES
 set(mm_SOURCES
         ${COMMON_SOURCES}
         ${CMAKE_SOURCE_DIR}/matrix_mult.c
+        matmul/compute.h
 )
 
 set(BW_SOURCES

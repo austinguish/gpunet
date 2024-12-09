@@ -69,12 +69,10 @@ __device__ void prepare_packet(uintptr_t buf_addr,
     *total_size = sizeof(struct eth_ip_udp_hdr) +
                   sizeof(struct MatrixPacketHeader) +
                   actual_size * sizeof(float);
-    printf("the total size is %d\n",*total_size);
 
 }
 
 __global__ void cuda_kernel_send_matrix(
-    uint32_t* exit_cond,
     struct doca_gpu_eth_txq* txq0,
     struct doca_gpu_eth_txq* txq1,
     struct doca_gpu_eth_txq* txq2,
@@ -113,7 +111,6 @@ __global__ void cuda_kernel_send_matrix(
         if (ret != DOCA_SUCCESS) {
             if (lane_id == 0) {
                 printf("Buffer allocation failed for chunk %d\n", chunk_idx);
-                DOCA_GPUNETIO_VOLATILE(*exit_cond) = 1;
             }
             return;
         }
@@ -124,7 +121,6 @@ __global__ void cuda_kernel_send_matrix(
         if (ret != DOCA_SUCCESS) {
             if (lane_id == 0) {
                 printf("Failed to get buffer address for chunk %d\n", chunk_idx);
-                DOCA_GPUNETIO_VOLATILE(*exit_cond) = 1;
             }
             return;
         }
@@ -133,11 +129,10 @@ __global__ void cuda_kernel_send_matrix(
         uint32_t total_size;
         prepare_packet(buf_addr, chunk_idx, &ctx, &total_size);
 
-        ret = doca_gpu_dev_eth_txq_send_enqueue_strong(txq, buf, total_size, 0);
+        ret = doca_gpu_dev_eth_txq_send_enqueue_strong(txq, buf, total_size, DOCA_GPU_SEND_FLAG_NOTIFY);
         if (ret != DOCA_SUCCESS) {
             if (lane_id == 0) {
                 printf("Packet enqueue failed for chunk %d\n", chunk_idx);
-                DOCA_GPUNETIO_VOLATILE(*exit_cond) = 1;
             }
             return;
         }
@@ -151,12 +146,14 @@ __global__ void cuda_kernel_send_matrix(
             send_pkts += __shfl_down_sync(WARP_FULL_MASK, send_pkts, offset);
         }
 
-        // 每个warp的第一个线程负责提交和推送
+        // the first thread in every warp will commit and send
         if (lane_id == 0 && send_pkts > 0) {
             doca_gpu_dev_eth_txq_commit_strong(txq);
             doca_gpu_dev_eth_txq_push(txq);
         }
     }
+    // sychronize the each thread
+
 }
 
 
@@ -170,7 +167,7 @@ __global__ void cuda_kernel_send_matrix(
 extern "C" {
 doca_error_t kernel_send_matrix_c(cudaStream_t stream,
                                   rxq_udp_bw_queues* queues, float* mat_c,
-                                  uint32_t total_chunks, uint32_t total_elems, uint32_t* exit_cond, struct NetInfo net_info)
+                                  uint32_t total_chunks, struct NetInfo* net_info)
 {
     if (!queues || !mat_c)
     {
@@ -190,14 +187,13 @@ doca_error_t kernel_send_matrix_c(cudaStream_t stream,
     ctx.buf_arr = queues->buf_response.buf_arr_gpu;
     for (int i = 0;i<ETHER_ADDR_LEN;i++)
     {
-        ctx.eth_src_addr_bytes[i] = net_info.eth_src_addr_bytes[i];
-        ctx.eth_dst_addr_bytes[i] = net_info.eth_dst_addr_bytes[i];
+        ctx.eth_src_addr_bytes[i] = net_info->eth_src_addr_bytes[i];
+        ctx.eth_dst_addr_bytes[i] = net_info->eth_dst_addr_bytes[i];
     }
-    ctx.ip_src_addr = net_info.ip_src_addr;
-    ctx.ip_dst_addr = net_info.ip_dst_addr;
+    ctx.ip_src_addr = net_info->ip_src_addr;
+    ctx.ip_dst_addr = net_info->ip_dst_addr;
 
     cuda_kernel_send_matrix<<<queues->numq, CUDA_THREADS, 0, stream>>>(
-        exit_cond,
         queues->eth_txq_gpu[0],
         queues->eth_txq_gpu[1],
         queues->eth_txq_gpu[2],

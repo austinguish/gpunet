@@ -29,6 +29,7 @@
 #include "defines.h"
 #include <doca_eth_txq_gpu_data_path.h>
 #include "matmul/mat_message.h"
+
 extern bool force_quit;
 
 /* Application configuration structure */
@@ -445,12 +446,13 @@ doca_error_t create_udp_queues(struct rxq_udp_queues* udp_queues,
 doca_error_t destroy_udp_queues(struct rxq_udp_queues* udp_queues);
 
 doca_error_t create_udp_bw_queues(struct rxq_udp_bw_queues* udp_queues,
-                               struct doca_flow_port* df_port,
-                               struct doca_gpu* gpu_dev,
-                               struct doca_dev* ddev,
-                               struct doca_pe* pe,
-                               uint32_t queue_num,
-                               uint32_t sem_num,doca_eth_txq_gpu_event_error_send_packet_cb_t event_error_send_packet_cb);
+                                  struct doca_flow_port* df_port,
+                                  struct doca_gpu* gpu_dev,
+                                  struct doca_dev* ddev,
+                                  struct doca_pe* pe,
+                                  uint32_t queue_num,
+                                  uint32_t sem_num, doca_eth_txq_gpu_event_error_send_packet_cb_t event_error_send_packet_cb, doca_eth_txq_gpu_event_notify_send_packet_cb_t
+                                  event_notify_send_packet_cb);
 
 doca_error_t destroy_udp_bw_queues(struct rxq_udp_bw_queues* udp_queues);
 
@@ -560,6 +562,9 @@ void debug_send_packet_icmp_cb(struct doca_eth_txq_gpu_event_notify_send_packet*
 void debug_send_packet_tcp_bw_cb(struct doca_eth_txq_gpu_event_notify_send_packet* event_notify,
                                union doca_data event_user_data);
 
+void debug_send_packet_udp_bw_cb(struct doca_eth_txq_gpu_event_notify_send_packet* event_notify,
+                               union doca_data event_user_data);
+
 #if __cplusplus
 extern "C" {
 #endif
@@ -646,7 +651,8 @@ doca_error_t kernel_tcp_bw_test(
                                     struct rxq_udp_bw_queues* udp_queues);
     doca_error_t kernel_send_matrix_c(cudaStream_t stream,
                                       struct rxq_udp_bw_queues *queues, float* mat_c,
-                                      uint32_t total_chunks, uint32_t total_elems, uint32_t* exit_cond, struct NetInfo net_info);
+                                      uint32_t total_chunks, struct NetInfo* net_info);
+
 
 #if __cplusplus
 }

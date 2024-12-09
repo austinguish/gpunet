@@ -39,7 +39,8 @@ doca_error_t create_udp_bw_queues(struct rxq_udp_bw_queues* udp_queues,
                                   struct doca_pe* pe,
                                   uint32_t queue_num,
                                   uint32_t sem_num,
-                                  doca_eth_txq_gpu_event_error_send_packet_cb_t event_error_send_packet_cb)
+                                  doca_eth_txq_gpu_event_error_send_packet_cb_t event_error_send_packet_cb, doca_eth_txq_gpu_event_notify_send_packet_cb_t
+                                  event_notify_send_packet_cb)
 {
     doca_error_t result;
     uint32_t cyclic_buffer_size = 0;
@@ -263,6 +264,14 @@ doca_error_t create_udp_bw_queues(struct rxq_udp_bw_queues* udp_queues,
             {
                 DOCA_LOG_ERR("Unable to set DOCA progress engine callback: %s",
                              doca_error_get_descr(result));
+                destroy_udp_bw_queues(udp_queues);
+                return DOCA_ERROR_BAD_STATE;
+            }result = doca_eth_txq_gpu_event_notify_send_packet_register(udp_queues->eth_txq_cpu[idx],
+                                                                        event_notify_send_packet_cb,
+                                                                        event_user_data[idx]);
+            if (result != DOCA_SUCCESS)
+            {
+                DOCA_LOG_ERR("Failed to register notify callback");
                 destroy_udp_bw_queues(udp_queues);
                 return DOCA_ERROR_BAD_STATE;
             }
