@@ -85,13 +85,13 @@ void debug_send_packet_udp_bw_cb(struct doca_eth_txq_gpu_event_notify_send_packe
 	uint64_t packet_timestamp;
 	uint64_t ts_diff = 0;
 
-	// 获取包的位置信息
+	// get the locate
 	doca_eth_txq_gpu_event_notify_send_packet_get_position(event_notify, &packet_index);
 
-	// 获取包的时间戳
+	// get the timestamp
 	doca_eth_txq_gpu_event_notify_send_packet_get_timestamp(event_notify, &packet_timestamp);
 
-	// 计算与上一个包的时间差
+	// calculate the time interval
 	if (tcp_last_packet_time != 0) {
 		ts_diff = packet_timestamp - tcp_last_packet_time;
 	}
@@ -103,7 +103,7 @@ void debug_send_packet_udp_bw_cb(struct doca_eth_txq_gpu_event_notify_send_packe
 				  packet_timestamp,
 				  (double)((ts_diff > 0 ? ((double)ts_diff) / 1000000000.0 : 0)));
 
-	// 更新最后一个包的时间戳
+	// update the last timestamp
 	tcp_last_packet_time = packet_timestamp;
 }
 

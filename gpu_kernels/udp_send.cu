@@ -45,6 +45,9 @@ __device__ void prepare_packet(uintptr_t buf_addr,
     net_header->l3_hdr.dst_addr = ctx->ip_src_addr;
     net_header->l4_hdr.src_port = 0x1234;
     net_header->l4_hdr.dst_port = 0x5678;
+    // reset the checksum
+
+    net_header->l3_hdr.hdr_checksum = 0;
 
     uint8_t* payload = reinterpret_cast<uint8_t*>((uintptr_t)(net_header + 1) & ~0x7);
 
