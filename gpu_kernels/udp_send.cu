@@ -52,14 +52,14 @@ __device__ void prepare_packet(uintptr_t buf_addr,
     uint8_t* payload = reinterpret_cast<uint8_t*>((uintptr_t)(net_header + 1) & ~0x7);
 
 
-    // 准备矩阵头部
+    // prepare the matrix header
     struct MatrixPacketHeader* matrix_header = (struct MatrixPacketHeader*)payload;
     matrix_header->matrix_id = ctx->matrix_id;
     matrix_header->chunk_id = chunk_idx;
     matrix_header->total_chunks = ctx->total_chunks;
     matrix_header->chunk_size = ctx->chunk_size;
 
-    // 复制矩阵数据
+    // copy the matrix data
     float* data_payload = (float*)(payload + sizeof(struct MatrixPacketHeader));
     uint32_t start_idx = chunk_idx * ctx->chunk_size;
     uint32_t actual_size = min(ctx->chunk_size,

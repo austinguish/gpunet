@@ -24,7 +24,7 @@ static struct rte_mbuf* prepare_matrix_packet(struct rte_mempool *mp,
     //     return NULL;
     // }
 
-    // 为整个包分配空间
+    // allocate buffer for the packet
     size_t total_size = sizeof(struct ether_hdr) + sizeof(struct ipv4_hdr) +
                        sizeof(struct udp_hdr) + sizeof(struct MatrixPacketHeader) +
                        chunk_size * sizeof(float);
@@ -47,8 +47,8 @@ static struct rte_mbuf* prepare_matrix_packet(struct rte_mempool *mp,
     ip_hdr->fragment_offset = 0;
     ip_hdr->time_to_live = 64;
     ip_hdr->next_proto_id = IPPROTO_UDP;
-    ip_hdr->src_addr = inet_addr("10.134.11.66");
-    ip_hdr->dst_addr = inet_addr("10.134.11.61");
+    ip_hdr->src_addr = net_info->net_info.ip_dst_addr;
+    ip_hdr->dst_addr = net_info->net_info.ip_src_addr;
     ip_hdr->hdr_checksum = 0;
     ip_hdr->hdr_checksum = rte_ipv4_cksum(ip_hdr);
 
@@ -117,7 +117,7 @@ void send_by_cpu(int matrix_size, const struct MatrixCompletionInfo* completion_
                 continue;
             }
 
-            // 发送包
+            // send the packet
             uint16_t nb_tx = rte_eth_tx_burst(dpdk_dev_port_id, 0, &pkt, 1);
             if (nb_tx == 0) {
                 printf("Failed to send packet for chunk %u\n", chunk_id);
