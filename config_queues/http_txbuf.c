@@ -368,8 +368,6 @@ doca_error_t prepare_resp_tx_buf(struct tx_buf *buf)
         // IP header
         hdr->l3_hdr.version_ihl = 0x45;
         hdr->l3_hdr.type_of_service = 0x0;
-        hdr->l3_hdr.total_length =
-            BYTE_SWAP16(sizeof(struct ipv4_hdr) + sizeof(struct udp_hdr) + buf->pkt_nbytes);
         hdr->l3_hdr.packet_id = 0;
         hdr->l3_hdr.fragment_offset = 0;
         hdr->l3_hdr.time_to_live = 64;
@@ -379,9 +377,9 @@ doca_error_t prepare_resp_tx_buf(struct tx_buf *buf)
         hdr->l3_hdr.dst_addr = 0;
 
         // UDP header
-        hdr->l4_hdr.src_port = 0;
-        hdr->l4_hdr.dst_port = 9943;
-        hdr->l4_hdr.dgram_len = BYTE_SWAP16(sizeof(struct udp_hdr) + buf->pkt_nbytes);
+        hdr->l4_hdr.src_port = ntohs(1234);
+        hdr->l4_hdr.dst_port = ntohs(5678);
+        hdr->l4_hdr.dgram_len = 0;
         hdr->l4_hdr.dgram_cksum = 0;
     }
 

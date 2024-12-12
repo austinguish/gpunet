@@ -151,4 +151,24 @@ _gputimestamp()
 	return globaltimer;
 }
 
+
+__device__ inline uint16_t gpu_htons(uint16_t x) {
+    return (x << 8) | (x >> 8);
+}
+
+__device__ inline uint16_t gpu_ntohs(uint16_t x) {
+    return gpu_htons(x);
+}
+
+__device__ inline uint32_t gpu_htonl(uint32_t x) {
+    return ((x & 0x000000FF) << 24) |
+           ((x & 0x0000FF00) << 8)  |
+           ((x & 0x00FF0000) >> 8)  |
+           ((x & 0xFF000000) >> 24);
+}
+
+__device__ inline uint32_t gpu_ntohl(uint32_t x) {
+    return gpu_htonl(x);
+}
+
 #endif /* DOCA_GPUNETIO_FILTERS_H */

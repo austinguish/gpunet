@@ -39,7 +39,8 @@ doca_error_t create_udp_bw_queues(struct rxq_udp_bw_queues* udp_queues,
                                   struct doca_pe* pe,
                                   uint32_t queue_num,
                                   uint32_t sem_num,
-                                  doca_eth_txq_gpu_event_error_send_packet_cb_t event_error_send_packet_cb, doca_eth_txq_gpu_event_notify_send_packet_cb_t
+                                  doca_eth_txq_gpu_event_error_send_packet_cb_t event_error_send_packet_cb,
+                                  doca_eth_txq_gpu_event_notify_send_packet_cb_t
                                   event_notify_send_packet_cb)
 {
     doca_error_t result;
@@ -87,7 +88,7 @@ doca_error_t create_udp_bw_queues(struct rxq_udp_bw_queues* udp_queues,
                                                        MAX_PKT_NUM,
                                                        0,
                                                        &cyclic_buffer_size);
-        DOCA_LOG_INFO("the cyclic buffer size is %d",cyclic_buffer_size);
+        DOCA_LOG_INFO("the cyclic buffer size is %d", cyclic_buffer_size);
         if (result != DOCA_SUCCESS)
         {
             DOCA_LOG_ERR("Failed to get eth_rxq cyclic buffer size: %s", doca_error_get_descr(result));
@@ -237,6 +238,14 @@ doca_error_t create_udp_bw_queues(struct rxq_udp_bw_queues* udp_queues,
             destroy_udp_bw_queues(udp_queues);
             return DOCA_ERROR_BAD_STATE;
         }
+        result = doca_eth_txq_set_l4_chksum_offload(udp_queues->eth_txq_cpu[idx], 1);
+        if (result != DOCA_SUCCESS)
+        {
+            DOCA_LOG_ERR("Failed to set l4 udp offloads: %s", doca_error_get_descr(result));
+            destroy_udp_bw_queues(udp_queues);
+            return DOCA_ERROR_BAD_STATE;
+        }
+
 
         udp_queues->eth_txq_ctx[idx] = doca_eth_txq_as_doca_ctx(udp_queues->eth_txq_cpu[idx]);
         if (udp_queues->eth_txq_ctx[idx] == NULL)
@@ -266,7 +275,8 @@ doca_error_t create_udp_bw_queues(struct rxq_udp_bw_queues* udp_queues,
                              doca_error_get_descr(result));
                 destroy_udp_bw_queues(udp_queues);
                 return DOCA_ERROR_BAD_STATE;
-            }result = doca_eth_txq_gpu_event_notify_send_packet_register(udp_queues->eth_txq_cpu[idx],
+            }
+            result = doca_eth_txq_gpu_event_notify_send_packet_register(udp_queues->eth_txq_cpu[idx],
                                                                         event_notify_send_packet_cb,
                                                                         event_user_data[idx]);
             if (result != DOCA_SUCCESS)
@@ -365,13 +375,11 @@ doca_error_t create_udp_bw_queues(struct rxq_udp_bw_queues* udp_queues,
     }
 
 
-
-
     result = create_tx_buf(&udp_queues->buf_response,
-                                   udp_queues->gpu_dev,
-                                   udp_queues->ddev,
-                                  TX_BUF_NUM,
-                                  TX_BUF_MAX_SZ);
+                           udp_queues->gpu_dev,
+                           udp_queues->ddev,
+                           TX_BUF_NUM,
+                           TX_BUF_MAX_SZ);
     if (result != DOCA_SUCCESS)
     {
         DOCA_LOG_ERR("Failed create buf_page_contacts: %s", doca_error_get_descr(result));

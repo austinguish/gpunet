@@ -11,6 +11,51 @@
 #include "rte_mbuf.h"
 #include "packets.h"
 #include "rte_ip.h"
+
+void print_info(struct rte_mbuf *buf) {
+    struct ether_hdr *eth_hdr;
+    struct ipv4_hdr *ip_hdr;
+    struct udp_hdr *udp_hdr;
+    struct MatrixPacketHeader *mat_hdr;
+    float *data;
+
+    eth_hdr = rte_pktmbuf_mtod(buf, struct ether_hdr *);
+    ip_hdr = (struct ipv4_hdr *)(eth_hdr + 1);
+    udp_hdr = (struct udp_hdr *)(ip_hdr + 1);
+    mat_hdr = (struct MatrixPacketHeader *)(udp_hdr + 1);
+    data = (float *)(mat_hdr + 1);
+
+    // MAC地址打印保持不变
+    printf("dst mac: %02x:%02x:%02x:%02x:%02x:%02x\n",
+           eth_hdr->d_addr_bytes[0], eth_hdr->d_addr_bytes[1],
+           eth_hdr->d_addr_bytes[2], eth_hdr->d_addr_bytes[3],
+           eth_hdr->d_addr_bytes[4], eth_hdr->d_addr_bytes[5]);
+    printf("src mac: %02x:%02x:%02x:%02x:%02x:%02x\n",
+           eth_hdr->s_addr_bytes[0], eth_hdr->s_addr_bytes[1],
+           eth_hdr->s_addr_bytes[2], eth_hdr->s_addr_bytes[3],
+           eth_hdr->s_addr_bytes[4], eth_hdr->s_addr_bytes[5]);
+
+    // 修复IP地址打印，使用rte_be_to_cpu_32()转换网络字节序
+    uint32_t src_ip = rte_be_to_cpu_32(ip_hdr->src_addr);
+    uint32_t dst_ip = rte_be_to_cpu_32(ip_hdr->dst_addr);
+
+    printf("src ip: %u.%u.%u.%u\n",
+           (uint8_t)(src_ip >> 24),
+           (uint8_t)(src_ip >> 16),
+           (uint8_t)(src_ip >> 8),
+           (uint8_t)(src_ip));
+
+    printf("dst ip: %u.%u.%u.%u\n",
+           (uint8_t)(dst_ip >> 24),
+           (uint8_t)(dst_ip >> 16),
+           (uint8_t)(dst_ip >> 8),
+           (uint8_t)(dst_ip));
+
+    printf("src port: %u\n", ntohs(udp_hdr->src_port));
+    printf("dst port: %u\n", ntohs(udp_hdr->dst_port));
+    printf("matrix id: %u\n", mat_hdr->matrix_id);
+}
+
 static struct rte_mbuf* prepare_matrix_packet(struct rte_mempool *mp,
                                             const float *data,
                                             uint32_t matrix_id,
@@ -56,6 +101,9 @@ static struct rte_mbuf* prepare_matrix_packet(struct rte_mempool *mp,
     struct udp_hdr *udp_hdr = (struct udp_hdr *)(ip_hdr + 1);
     udp_hdr->src_port = htons(1234);
     udp_hdr->dst_port = htons(5678);
+    printf("the htonsed src_port is %u\n",htons(1234));
+    printf("the htonsed dst_port is %u\n",htons(5678));
+
     udp_hdr->dgram_len = htons(sizeof(struct udp_hdr) + sizeof(struct MatrixPacketHeader) +
                               chunk_size * sizeof(float));
 
@@ -112,10 +160,12 @@ void send_by_cpu(int matrix_size, const struct MatrixCompletionInfo* completion_
                 completion_info
             );
 
+
             if (pkt == NULL) {
                 printf("Failed to prepare packet for chunk %u\n", chunk_id);
                 continue;
             }
+            print_info(pkt);
 
             // send the packet
             uint16_t nb_tx = rte_eth_tx_burst(dpdk_dev_port_id, 0, &pkt, 1);

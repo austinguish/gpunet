@@ -593,7 +593,8 @@ doca_error_t kernel_receive_tcp(cudaStream_t stream,
  */
 doca_error_t kernel_receive_udp(cudaStream_t stream, uint32_t* exit_cond, struct rxq_udp_queues* udp_queues);
 
-    doca_error_t kernel_receive_udp_bw(cudaStream_t stream, uint32_t* exit_cond, struct rxq_udp_bw_queues* udp_queues, float* mat_a, float* mat_b);
+    doca_error_t kernel_receive_udp_bw(cudaStream_t stream, uint32_t* exit_cond, struct rxq_udp_bw_queues* udp_queues, float* mat_a, float* mat_b, uint8_t*
+                                       debug_buf);
 
 
 /*
@@ -651,7 +652,7 @@ doca_error_t kernel_tcp_bw_test(
                                     struct rxq_udp_bw_queues* udp_queues);
     doca_error_t kernel_send_matrix_c(cudaStream_t stream,
                                       struct rxq_udp_bw_queues *queues, float* mat_c,
-                                      uint32_t total_chunks, struct NetInfo* net_info);
+                                      uint32_t matrix_size, struct NetInfo* net_info, uint8_t* debug_buf);
 
 
 #if __cplusplus
