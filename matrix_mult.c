@@ -270,7 +270,7 @@ static void stats_core(void* args)
 
                     // Wait for computation to complete
                     cudaStreamSynchronize(compute_stream);
-                    send_by_cpu(matrix_size, completion_info, C, dpdk_dev_port_id, udp_queues.send_pkt_pool);
+                    //send_by_cpu(matrix_size, completion_info, C, dpdk_dev_port_id, udp_queues.send_pkt_pool);
                     // copy the ip
 
                     kernel_send_matrix_c(tx_udp_stream, &udp_queues, C, matrix_size,

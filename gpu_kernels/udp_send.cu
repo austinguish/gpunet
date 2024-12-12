@@ -54,23 +54,24 @@ __device__ void prepare_packet(uintptr_t buf_addr,
 
     net_header->l3_hdr.hdr_checksum = 0;
 
-    uint8_t* payload = reinterpret_cast<uint8_t*>(((uintptr_t)(net_header + 1) + 3) & ~0x3);
-    uint32_t padding_size = payload - (uint8_t*)(net_header + 1);
+    uint8_t* header_end = (uint8_t*)(net_header + 1);
+        uint8_t* aligned_payload = (uint8_t*)(((uintptr_t)header_end + 3) & ~0x3);
+        uint32_t padding_size = aligned_payload - header_end;
     printf("Original address: %p\n", (void*)(net_header + 1));
-    printf("Aligned address: %p\n", (void*)payload);
+    printf("Aligned address: %p\n", (void*)aligned_payload);
     printf("Padding size: %u bytes\n", padding_size);
     // prepare the matrix header
-    struct MatrixPacketHeader* matrix_header = (struct MatrixPacketHeader*)payload;
-    matrix_header->matrix_id = ctx->matrix_id;
-    matrix_header->chunk_id = chunk_idx;
-    matrix_header->total_chunks = ctx->total_chunks;
-    matrix_header->chunk_size = ctx->chunk_size;
+    struct MatrixPacketHeader* matrix_header = (struct MatrixPacketHeader*)aligned_payload;
+        matrix_header->matrix_id = ctx->matrix_id;
+        matrix_header->chunk_id = chunk_idx;
+        matrix_header->total_chunks = ctx->total_chunks;
+        matrix_header->chunk_size = ctx->chunk_size;
 
     // copy the matrix data
-    float* data_payload = (float*)(payload + sizeof(struct MatrixPacketHeader));
-    uint32_t start_idx = chunk_idx * ctx->chunk_size;
-    uint32_t actual_size = min(ctx->chunk_size,
-                               ctx->total_chunks - start_idx);
+   float* data_payload = (float*)(matrix_header + 1);
+       uint32_t start_idx = chunk_idx * ctx->chunk_size;
+       uint32_t actual_size = min(ctx->chunk_size,
+                                 ctx->total_numbers - start_idx);
 
     for (uint32_t i = 0; i < actual_size; i++)
     {
@@ -86,6 +87,14 @@ __device__ void prepare_packet(uintptr_t buf_addr,
     net_header->l3_hdr.total_length = gpu_htons(udp_payload_size + sizeof(ipv4_hdr) + sizeof(udp_hdr));
     //set the checksum to 0
     net_header->l3_hdr.hdr_checksum = 0;
+    if (chunk_idx == 0) {
+            printf("Debug Info:\n");
+            printf("Padding size: %u bytes\n", padding_size);
+            printf("UDP payload size: %u bytes\n", udp_payload_size);
+            printf("Total packet size: %u bytes\n", *total_size);
+            printf("Matrix header offset: %lu bytes\n", aligned_payload - (uint8_t*)net_header);
+            printf("Data payload offset: %lu bytes\n", (uint8_t*)data_payload - (uint8_t*)net_header);
+        }
 }
 
 __global__ void cuda_kernel_send_matrix(
