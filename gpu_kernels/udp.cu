@@ -105,25 +105,34 @@ __device__ void print_eth_ip_udp_headers(const struct eth_ip_udp_hdr* hdr)
 __device__ void parse_matrix_packet(const uint8_t* payload, float* mat_a, float* mat_b,
                                     MatrixCompletionInfo* stat_thread)
 {
-    MatrixPacketHeader header;
+    // skipping the first 2 bytes for padding.
+    printf("First 20 bytes of payload: ");
+    for (int i = 0; i < 20; i++)
+    {
+        printf("%02x ", payload[i]);
+    }
+    printf("\n");
+    MatrixPacketHeader* header = (MatrixPacketHeader*)(payload + 2);
     stat_thread->received_chunk_num++;
-    memcpy(&header, payload, sizeof(MatrixPacketHeader));
-    stat_thread->total_chunks_a = header.total_chunks;
-    if (header.matrix_id == 0)
-        stat_thread->received_a_elems += header.chunk_size;
-    else if (header.matrix_id == 1)
-        stat_thread->received_b_elems += header.chunk_size;
-    const float* data = reinterpret_cast<const float*>(payload + sizeof(MatrixPacketHeader));
-    float* target_matrix = (header.matrix_id == 0) ? mat_a : mat_b;
-    size_t offset = header.chunk_id * header.chunk_size;
+    // convert the order
 
-    // copy the data to the target matrix
-    memcpy(target_matrix + offset, data, header.chunk_size * sizeof(float));
 
-    // // print some value for debug
-    // for (int i = 0; i < min(5, (int)header.chunk_size); i++) {
-    // 	printf("data[%d] = %f\n", i, target_matrix[offset + i]);
-    // }
+    header->matrix_id = BYTE_SWAP32(header->matrix_id);
+    header->chunk_id = BYTE_SWAP32(header->chunk_id);
+    header->total_chunks = BYTE_SWAP32(header->total_chunks);
+    header->chunk_size = BYTE_SWAP32(header->chunk_size);
+    // printf("Raw values - matrix_id: %u, chunk_id: %u, total_chunks: %u, chunk_size: %u\n",
+    //        header->matrix_id, header->chunk_id, header->total_chunks, header->chunk_size);
+     stat_thread->total_chunks_a = header->total_chunks;
+    if (header->matrix_id == 0)
+        stat_thread->received_a_elems += header->chunk_size;
+    else if (header->matrix_id == 1)
+        stat_thread->received_b_elems += header->chunk_size;
+    // print the first 4 floats
+    float* data = (float*)(payload + 2 + sizeof(MatrixPacketHeader));
+    float* target_matrix = (header->matrix_id == 0) ? mat_a : mat_b;
+    size_t offset = header->chunk_id * header->chunk_size;
+    memcpy(target_matrix + offset, data, header->chunk_size * sizeof(float));
 }
 
 
@@ -246,21 +255,16 @@ __global__ void cuda_kernel_receive_udp_bw(uint32_t* exit_cond,
             }
 
             raw_to_udp(buf_addr, &hdr, &payload);
-            if (threadIdx.x == 0)
-            {
-                //copy the packet buf to the debug buf
-                memcpy(debug_buf, (uint8_t*)buf_addr, 2048);
-                printf("============================================\n");
-                printf("Source Port: %u\n", hdr->l4_hdr.src_port);
-                printf("Destination Port: %u\n", hdr->l4_hdr.dst_port);
-                printf("Datagram Length: %u\n", hdr->l4_hdr.dgram_len);
-            }
-
-            // use one of the thread to copy the hdr to the resp_hdr
-            // if (threadIdx.x==0)
+            // if (threadIdx.x == 0)
             // {
-            //  print_eth_ip_udp_headers(hdr);
+            //     //copy the packet buf to the debug buf
+            //     memcpy(debug_buf, (uint8_t*)buf_addr, 2048);
+            //     printf("============================================\n");
+            //     printf("Source Port: %u\n", hdr->l4_hdr.src_port);
+            //     printf("Destination Port: %u\n", hdr->l4_hdr.dst_port);
+            //     printf("Datagram Length: %u\n", hdr->l4_hdr.dgram_len);
             // }
+
 
             // print the packet size
             // printf("received a packet with size %d\n",hdr->l4_hdr.dgram_len);

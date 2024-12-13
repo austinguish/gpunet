@@ -55,13 +55,12 @@ __device__ void prepare_packet(uintptr_t buf_addr,
     net_header->l3_hdr.hdr_checksum = 0;
 
     uint8_t* header_end = (uint8_t*)(net_header + 1);
-        uint8_t* aligned_payload = (uint8_t*)(((uintptr_t)header_end + 3) & ~0x3);
-        uint32_t padding_size = aligned_payload - header_end;
-    printf("Original address: %p\n", (void*)(net_header + 1));
-    printf("Aligned address: %p\n", (void*)aligned_payload);
-    printf("Padding size: %u bytes\n", padding_size);
+    // add 2 bytes 0 for the padding
+    memset(header_end,0,2);
+    header_end+=2;
+
     // prepare the matrix header
-    struct MatrixPacketHeader* matrix_header = (struct MatrixPacketHeader*)aligned_payload;
+    struct MatrixPacketHeader* matrix_header = (struct MatrixPacketHeader*)header_end;
         matrix_header->matrix_id = ctx->matrix_id;
         matrix_header->chunk_id = chunk_idx;
         matrix_header->total_chunks = ctx->total_chunks;
@@ -77,7 +76,7 @@ __device__ void prepare_packet(uintptr_t buf_addr,
     {
         data_payload[i] = ctx->matrix_data[start_idx + i];
     }
-    uint32_t udp_payload_size = sizeof(struct MatrixPacketHeader) + actual_size * sizeof(float) + padding_size;
+    uint32_t udp_payload_size = sizeof(struct MatrixPacketHeader) + actual_size * sizeof(float)+2;
     *total_size = sizeof(struct eth_ip_udp_hdr) + udp_payload_size;
     // set the header length
     net_header->l4_hdr.dgram_len = gpu_htons(udp_payload_size + sizeof(udp_hdr));
@@ -89,10 +88,8 @@ __device__ void prepare_packet(uintptr_t buf_addr,
     net_header->l3_hdr.hdr_checksum = 0;
     if (chunk_idx == 0) {
             printf("Debug Info:\n");
-            printf("Padding size: %u bytes\n", padding_size);
             printf("UDP payload size: %u bytes\n", udp_payload_size);
             printf("Total packet size: %u bytes\n", *total_size);
-            printf("Matrix header offset: %lu bytes\n", aligned_payload - (uint8_t*)net_header);
             printf("Data payload offset: %lu bytes\n", (uint8_t*)data_payload - (uint8_t*)net_header);
         }
 }
@@ -229,8 +226,7 @@ doca_error_t kernel_send_matrix_c(cudaStream_t stream,
     if (total_numbers < MAX_FLOATS_PER_PACKET) {
         ctx.chunk_size = total_numbers;
         ctx.total_chunks = 1;  // 只需要一个chunk
-    } else {
-        // 对于大矩阵，继续使用最大包容量
+    } else{
         ctx.chunk_size = MAX_FLOATS_PER_PACKET;
         ctx.total_chunks = (total_numbers + ctx.chunk_size - 1) / ctx.chunk_size;
     }

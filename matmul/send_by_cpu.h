@@ -22,7 +22,11 @@ void print_info(struct rte_mbuf *buf) {
     eth_hdr = rte_pktmbuf_mtod(buf, struct ether_hdr *);
     ip_hdr = (struct ipv4_hdr *)(eth_hdr + 1);
     udp_hdr = (struct udp_hdr *)(ip_hdr + 1);
-    mat_hdr = (struct MatrixPacketHeader *)(udp_hdr + 1);
+    // add the padding
+    uint8_t *padding = (uint8_t *)(udp_hdr + 1);
+    memset(padding, 0, 2);
+    padding+=2;
+    mat_hdr = (struct MatrixPacketHeader *)(padding);
     data = (float *)(mat_hdr + 1);
 
     // MAC地址打印保持不变
@@ -53,7 +57,7 @@ void print_info(struct rte_mbuf *buf) {
 
     printf("src port: %u\n", ntohs(udp_hdr->src_port));
     printf("dst port: %u\n", ntohs(udp_hdr->dst_port));
-    printf("matrix id: %u\n", mat_hdr->matrix_id);
+    printf("chunk_size: %u\n", ntohl(mat_hdr->chunk_size));
 }
 
 static struct rte_mbuf* prepare_matrix_packet(struct rte_mempool *mp,
@@ -72,7 +76,7 @@ static struct rte_mbuf* prepare_matrix_packet(struct rte_mempool *mp,
     // allocate buffer for the packet
     size_t total_size = sizeof(struct ether_hdr) + sizeof(struct ipv4_hdr) +
                        sizeof(struct udp_hdr) + sizeof(struct MatrixPacketHeader) +
-                       chunk_size * sizeof(float);
+                       chunk_size * sizeof(float)+2;
 
     // prepare the packet
     char *payload = rte_pktmbuf_mtod(pkt, char *);
@@ -101,14 +105,26 @@ static struct rte_mbuf* prepare_matrix_packet(struct rte_mempool *mp,
     struct udp_hdr *udp_hdr = (struct udp_hdr *)(ip_hdr + 1);
     udp_hdr->src_port = htons(1234);
     udp_hdr->dst_port = htons(5678);
-    printf("the htonsed src_port is %u\n",htons(1234));
-    printf("the htonsed dst_port is %u\n",htons(5678));
+    // printf("the htonsed src_port is %u\n",htons(1234));
+    // printf("the htonsed dst_port is %u\n",htons(5678));
 
     udp_hdr->dgram_len = htons(sizeof(struct udp_hdr) + sizeof(struct MatrixPacketHeader) +
-                              chunk_size * sizeof(float));
+                              chunk_size * sizeof(float)+2);
+                              // printf("the dgram_len is %u\n",htons(udp_hdr->dgram_len));
+
+    char *current_ptr = (char *)(udp_hdr + 1);
+
+    // add two bytes of padding
+    memset(current_ptr, 0, 2);
+    current_ptr += 2;
 
     // 4. data header
-    struct MatrixPacketHeader *mat_hdr = (struct MatrixPacketHeader *)(udp_hdr + 1);
+    struct MatrixPacketHeader *mat_hdr = (struct MatrixPacketHeader *)current_ptr;
+    // mat_hdr->matrix_id = htonl(matrix_id);
+    // mat_hdr->chunk_id = htonl(chunk_id);
+    // mat_hdr->total_chunks = htonl(total_chunks);
+    // mat_hdr->chunk_size = htonl(chunk_size);
+    // try not use htonl
     mat_hdr->matrix_id = matrix_id;
     mat_hdr->chunk_id = chunk_id;
     mat_hdr->total_chunks = total_chunks;
@@ -125,6 +141,7 @@ static struct rte_mbuf* prepare_matrix_packet(struct rte_mempool *mp,
     // sent the packet
     pkt->data_len = total_size;
     pkt->pkt_len = pkt->data_len;
+    //printf("the pkt_len is %u\n",pkt->pkt_len);
 
     return pkt;
 }
@@ -161,11 +178,12 @@ void send_by_cpu(int matrix_size, const struct MatrixCompletionInfo* completion_
             );
 
 
+
             if (pkt == NULL) {
                 printf("Failed to prepare packet for chunk %u\n", chunk_id);
                 continue;
             }
-            print_info(pkt);
+            //print_info(pkt);
 
             // send the packet
             uint16_t nb_tx = rte_eth_tx_burst(dpdk_dev_port_id, 0, &pkt, 1);

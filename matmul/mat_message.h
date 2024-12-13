@@ -31,26 +31,24 @@ struct MatrixCompletionInfo
 // add the requirement for alignment
 #define MEMORY_ALIGNMENT 16
 
-#pragma pack(push, MEMORY_ALIGNMENT)
 
 #define MAX_MATRIX_DIMENSION 16384
 #define MAX_MATRIX_ELEMENTS (MAX_MATRIX_DIMENSION * MAX_MATRIX_DIMENSION)
 
-struct __align__(4) MatrixPacketHeader
+struct MatrixPacketHeader
 {
+    // uint8_t padding[2];
     uint32_t matrix_id; // 0: Matrix A, 1: Matrix B
     uint32_t chunk_id;
     uint32_t total_chunks;
     uint32_t chunk_size; // actual number of floats in payload
-};
-
-struct __align__(4) MatrixMessage
+}__attribute__((__packed__));
+struct MatrixMessage
 {
     struct MatrixPacketHeader header;
     float payload[];
-};
+}__attribute__((__packed__));
 
-#pragma pack(pop)
 
 
 #define UDP_MTU 1500

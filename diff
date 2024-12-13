@@ -267,11 +267,13 @@ static void stats_core(void* args)
 
                     // Wait for computation to complete
                     cudaStreamSynchronize(compute_stream);
-                    if (strcmp(app_cfg.send_device, "gpu") == 0){
-                         // copy the ip
-                        kernel_send_matrix_c(tx_udp_stream, &udp_queues, C, matrix_size,
-                                             &completion_info->net_info, debug_buf);
-                        cudaStreamSynchronize(tx_udp_stream);
+                    if (strcmp(app_cfg.send_device, "gpu") == 0)
+                    {
+                        //send_by_gpu(matrix_size, completion_info, C, dpdk_dev_port_id, udp_queues.send_pkt_pool);
+                        // copy the ip
+                        //kernel_send_matrix_c(tx_udp_stream, &udp_queues, C, matrix_size,
+                                             //&completion_info->net_info, debug_buf);
+                        //cudaStreamSynchronize(tx_udp_stream);
                     }
                     else
                     {

@@ -31,7 +31,6 @@
 #include "matmul/mat_message.h"
 
 extern bool force_quit;
-
 /* Application configuration structure */
 struct app_gpu_cfg
 {
@@ -39,6 +38,7 @@ struct app_gpu_cfg
     char nic_pcie_addr[DOCA_DEVINFO_PCI_ADDR_SIZE]; /* Network card PCIe address */
     uint8_t queue_num; /* Number of GPU receive queues */
     bool http_server; /* Enable GPU HTTP server */
+    char send_device[4];
 };
 
 /* Application TCP receive queues objects */
