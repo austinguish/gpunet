@@ -106,12 +106,12 @@ __device__ void parse_matrix_packet(const uint8_t* payload, float* mat_a, float*
                                     MatrixCompletionInfo* stat_thread)
 {
     // skipping the first 2 bytes for padding.
-    printf("First 20 bytes of payload: ");
-    for (int i = 0; i < 20; i++)
-    {
-        printf("%02x ", payload[i]);
-    }
-    printf("\n");
+    // printf("First 20 bytes of payload: ");
+    // for (int i = 0; i < 20; i++)
+    // {
+    //     printf("%02x ", payload[i]);
+    // }
+    // printf("\n");
     MatrixPacketHeader* header = (MatrixPacketHeader*)(payload + 2);
     stat_thread->received_chunk_num++;
     // convert the order

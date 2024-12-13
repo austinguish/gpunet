@@ -86,12 +86,12 @@ __device__ void prepare_packet(uintptr_t buf_addr,
     net_header->l3_hdr.total_length = gpu_htons(udp_payload_size + sizeof(ipv4_hdr) + sizeof(udp_hdr));
     //set the checksum to 0
     net_header->l3_hdr.hdr_checksum = 0;
-    if (chunk_idx == 0) {
-            printf("Debug Info:\n");
-            printf("UDP payload size: %u bytes\n", udp_payload_size);
-            printf("Total packet size: %u bytes\n", *total_size);
-            printf("Data payload offset: %lu bytes\n", (uint8_t*)data_payload - (uint8_t*)net_header);
-        }
+    // if (chunk_idx == 0) {
+    //         printf("Debug Info:\n");
+    //         printf("UDP payload size: %u bytes\n", udp_payload_size);
+    //         printf("Total packet size: %u bytes\n", *total_size);
+    //         printf("Data payload offset: %lu bytes\n", (uint8_t*)data_payload - (uint8_t*)net_header);
+    //     }
 }
 
 __global__ void cuda_kernel_send_matrix(
